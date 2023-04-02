@@ -5,7 +5,7 @@ fmt:
 	golangci-lint run --disable-all --no-config -Egofumpt --fix
 
 revive: fmt
-	revive -config $(HOME)/go/extras/revive.toml
+	revive -config .revive.toml
 
 lint: revive
 	golangci-lint run
