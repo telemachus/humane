@@ -1,6 +1,3 @@
-// Package humane provides a slog.Handler for a human-friendly version of logfmt.
-// The idea for this format comes from Brandur Leach in his original post about
-// logfmt. See https://brandur.org/logfmt for my inspiration.
 package humane
 
 import (
@@ -33,7 +30,7 @@ type handler struct {
 	addSource   bool
 }
 
-// Options are options for a [Handler].
+// Options are options for a [log/slog.Handler].
 type Options struct {
 	// Level reports the minimum level to log.
 	// Levels with lower levels are discarded.
@@ -51,12 +48,12 @@ type Options struct {
 	AddSource bool
 }
 
-// NewHandler constructs a Handler with default options.
+// NewHandler returns a [log/slog.Handler] using default options.
 func NewHandler(w io.Writer) slog.Handler {
 	return Options{}.NewHandler(w)
 }
 
-// NewHandler constructs a Handler with the given options.
+// NewHandler returns a [log/slog.Handler] using the receiver's options.
 func (opts Options) NewHandler(w io.Writer) slog.Handler {
 	h := &handler{
 		w:           w,
@@ -74,12 +71,12 @@ func (opts Options) NewHandler(w io.Writer) slog.Handler {
 	return h
 }
 
-// Enabled determines whether a handler logs at a given level.
+// Enabled indicates whether the receiver logs at a given level.
 func (h *handler) Enabled(_ context.Context, l slog.Level) bool {
 	return l >= h.level.Level()
 }
 
-// WithGroup returns a new handler with the given group appended to whatever
+// WithGroup returns a new [log/slog.Handler] with name appended to whatever
 // groups the receiver already has.
 func (h *handler) WithGroup(name string) slog.Handler {
 	h2 := h.clone()
@@ -87,8 +84,8 @@ func (h *handler) WithGroup(name string) slog.Handler {
 	return h2
 }
 
-// WithAttrs returns a new handler that has the attributes of the receiver plus
-// the attributes passed to WithAttrs.
+// WithAttrs returns a new [log/slog.Handler] that has the attributes of the
+// receiver plus the attributes passed to WithAttrs.
 func (h *handler) WithAttrs(as []slog.Attr) slog.Handler {
 	h2 := h.clone()
 	h2.goa = h2.goa.WithAttrs(as)
@@ -105,7 +102,8 @@ func (h *handler) clone() *handler {
 	}
 }
 
-// Handle handles a given record.
+// Handle formats a given record in a human-friendly but still largely
+// structured way.
 func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	h.mu.Lock()
 	fmt.Fprintf(&h.s, "%s | %s |", r.Level.String(), r.Message)
