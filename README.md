@@ -3,12 +3,20 @@
 `humane` provides a slog.Handler for a human-friendly version of logfmt.  The
 idea for this format comes from [Brandur Leach's original post about
 logfmt][logfmt].  See the section [Human logfmt and best practices][details]
-for details.  (Note also that Brandur Leach wrote that section in 2016, and he
-has nothing to do with this project.  Any bad ideas are entirely my fault, not
-his.)
+for details.  (To be very clear, Brandur Leach wrote that section in 2016, and
+he has nothing to do with this project.  Any bad ideas are entirely my fault,
+not his.)
 
 [logfmt]: https://brandur.org/logfmt
 [details]: https://brandur.org/logfmt#human
+
+## Warning
+
+[slog][slogdiscussion] has been accepted for Go 1.21, but it is still under
+development.  This handler is new and also still being tweaked.  Let me know
+if you have trouble with it, but be aware that API may change.
+
+[slogdiscussion]: https://github.com/golang/go/issues/56345
 
 ## The Format
 
