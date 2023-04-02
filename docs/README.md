@@ -14,7 +14,7 @@ not his.)
 
 [slog][slogdiscussion] has been accepted for Go 1.21, but it is still under
 development.  This handler is new and also still being tweaked.  Let me know
-if you have trouble with it, but be aware that API may change.
+if you have trouble with it, but be aware that the API may change.
 
 [slogdiscussion]: https://github.com/golang/go/issues/56345
 
