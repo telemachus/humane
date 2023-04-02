@@ -16,9 +16,8 @@ jobs:
         go: ['1.19', '1.20']
     name: humane test (using go ${{ matrix.go }} on ${{ matrix.os }})
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v3
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
         with:
           go-version: ${{ matrix.go }}
-          cache: true
       - run: make test
