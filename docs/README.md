@@ -41,7 +41,7 @@ probably use JSON or another format.)
 ## Installation
 
 ```
-go get github.com/telemachus/humane
+go install github.com/telemachus/humane
 ```
 
 ## Usage
