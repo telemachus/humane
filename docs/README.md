@@ -53,8 +53,8 @@ logger := slog.New(humane.NewHandler(os.Stdout))
 logger.Info("My informative message", "foo", "bar", "bizz", "buzz")
 logger.Error("Ooops", slog.Any("error", err))
 // Output:
-// INFO | My informative message | foo=bar bizz=buzz time=2023-04-02T10:50.09 EDT
-// ERROR | Ooops | error="error message" time=2023-04-02T10:50.09 EDT
+// INFO | My informative message | foo=bar bizz=buzz time="2023-04-02T10:50.09 EDT"
+// ERROR | Ooops | error="error message" time="2023-04-02T10:50.09 EDT"
 
 // You can also set options.  Again, see the next section for more details.
 ho := humane.Options{
