@@ -2,6 +2,13 @@ linters-settings:
   errcheck:
     check-type-assertions: true
     check-blank: true
+    exclude-functions:
+      - fmt.Printf
+      - fmt.Println
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - (*github.com/telemachus/humane/internal/buffer.Buffer).WriteByte
+      - (*github.com/telemachus/humane/internal/buffer.Buffer).WriteString
   goconst:
     min-len: 2
     min-occurrences: 3
@@ -35,7 +42,6 @@ linters:
     - exhaustive
     - goconst
     - gocritic
-    - gocyclo
     - gofmt
     - gofumpt
     - goimports

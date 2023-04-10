@@ -2,50 +2,68 @@ package humane
 
 import (
 	"context"
+	"encoding"
 	"fmt"
 	"io"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/telemachus/humane/internal/withsupport"
+	"github.com/telemachus/humane/internal/buffer"
+	"golang.org/x/exp/slices"
 	"golang.org/x/exp/slog"
 )
 
 var (
 	defaultLevel      = slog.LevelInfo
 	defaultTimeFormat = "2006-01-02T03:04.05 MST"
+	levelValues       = map[slog.Level]string{
+		slog.LevelDebug: "DEBUG |",
+		slog.LevelInfo:  " INFO |",
+		slog.LevelWarn:  " WARN |",
+		slog.LevelError: "ERROR |",
+	}
 )
 
 type handler struct {
 	w           io.Writer
-	s           strings.Builder
-	goa         *withsupport.GroupOrAttrs
 	mu          sync.Mutex
 	level       slog.Leveler
+	groups      []string
+	attrs       string
 	timeFormat  string
 	replaceAttr func(groups []string, a slog.Attr) slog.Attr
 	addSource   bool
 }
 
-// Options are options for a [log/slog.Handler].
+// Options are options for Humane's [log/slog.Handler].
+//
+// Level reports the minimum level to log. Humane uses [log/slog.LevelInfo] as
+// its default level. In order to set a different level, use one of the
+// built-in choices for [log/slog.Level] or implement a [log/slog.Leveler].
+//
+// ReplaceAttr is a user-defined function that receives each non-group Attr
+// before it is logged. By default, ReplaceAttr is nil, and no changes are made
+// to Attrs. Note: Humane's handler does not apply ReplaceAttr to the level or
+// message Attrs because the handler already formats these items in a specific
+// way. However, Humane does apply ReplaceAttr to the time Attr (unless it's
+// zero) and to the source Attr if AddSource is true.
+//
+// TimeFormat defaults to "2006-01-02T03:04.05 MST". Set a format option to
+// customize the presentation of the time. (See [time.Time.Format] for details
+// about the format string.)
+//
+// AddSource defaults to false. If AddSource is true, the handler adds to each
+// log event an Attr with [log/slog.SourceKey] as the key and "file:line" as
+// the value.
 type Options struct {
-	// Level reports the minimum level to log.
-	// Levels with lower levels are discarded.
-	// Humane uses [slog.LevelInfo] as its default level.
-	Level slog.Leveler
-	// ReplaceAttr rewrites Attrs before they are logged.
-	// By default, ReplaceAttr is nil, and no changes are made to Attrs.
-	// Note: Humane's handler does not apply ReplaceAttr to the level or
-	// message Attrs because they receive specific treatment by the
-	// handler.
+	Level       slog.Leveler
 	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
-	// TimeFormat defaults to "2006-01-02T03:04.05 MST".
-	TimeFormat string
-	// AddSource defaults to false.
-	AddSource bool
+	TimeFormat  string
+	AddSource   bool
 }
 
 // NewHandler returns a [log/slog.Handler] using default options.
@@ -62,6 +80,8 @@ func (opts Options) NewHandler(w io.Writer) slog.Handler {
 		replaceAttr: opts.ReplaceAttr,
 		addSource:   opts.AddSource,
 	}
+	// TODO: should this also use sync.Pool?
+	h.groups = make([]string, 0, 10)
 	if opts.Level == nil {
 		h.level = defaultLevel
 	}
@@ -71,24 +91,73 @@ func (opts Options) NewHandler(w io.Writer) slog.Handler {
 	return h
 }
 
-// Enabled indicates whether the receiver logs at a given level.
+// Users should not call the following methods directly on a handler. Instead,
+// users should create a logger and call methods on the logger. The logger will
+// create a record and invoke the handler's methods.
+
+// Enabled indicates whether the receiver logs at the given level.
 func (h *handler) Enabled(_ context.Context, l slog.Level) bool {
 	return l >= h.level.Level()
 }
 
-// WithGroup returns a new [log/slog.Handler] with name appended to whatever
-// groups the receiver already has.
-func (h *handler) WithGroup(name string) slog.Handler {
+// Handle formats a given record in a human-friendly but still largely
+// structured way.
+func (h *handler) Handle(_ context.Context, r slog.Record) error {
+	buf := buffer.New()
+	defer buf.Free()
+	h.appendLevel(buf)
+	buf.WriteByte(' ')
+	buf.WriteString(r.Message)
+	buf.WriteString(" |")
+	if len(h.attrs) > 0 {
+		buf.WriteString(h.attrs)
+	}
+	r.Attrs(func(a slog.Attr) {
+		h.appendAttr(buf, a)
+	})
+	if h.addSource && r.PC != 0 {
+		sourceAttr := h.newSourceAttr(r.PC)
+		h.appendAttr(buf, sourceAttr)
+	}
+	timeAttr := slog.Time(slog.TimeKey, r.Time)
+	if h.replaceAttr != nil {
+		timeAttr = h.replaceAttr(nil, timeAttr)
+	}
+	if !r.Time.IsZero() && !timeAttr.Equal(slog.Attr{}) {
+		appendKey(buf, nil, timeAttr.Key)
+		h.appendVal(buf, timeAttr.Value)
+	}
+	buf.WriteByte('\n')
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, err := h.w.Write(*buf)
+	return err
+}
+
+// WithAttrs returns a new [log/slog.Handler] that has the receiver's
+// attributes plus attrs.
+func (h *handler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return h
+	}
 	h2 := h.clone()
-	h2.goa = h2.goa.WithGroup(name)
+	buf := buffer.New()
+	defer buf.Free()
+	for _, a := range attrs {
+		h2.appendAttr(buf, a)
+	}
+	h2.attrs += string(*buf)
 	return h2
 }
 
-// WithAttrs returns a new [log/slog.Handler] that has the attributes of the
-// receiver plus the attributes passed to WithAttrs.
-func (h *handler) WithAttrs(as []slog.Attr) slog.Handler {
+// WithGroup returns a new [log/slog.Handler] with name appended to the
+// receiver's groups.
+func (h *handler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
+	}
 	h2 := h.clone()
-	h2.goa = h2.goa.WithAttrs(as)
+	h2.groups = append(h2.groups, name)
 	return h2
 }
 
@@ -96,93 +165,129 @@ func (h *handler) clone() *handler {
 	return &handler{
 		w:           h.w,
 		level:       h.level,
+		groups:      slices.Clip(h.groups),
+		attrs:       h.attrs,
 		timeFormat:  h.timeFormat,
 		replaceAttr: h.replaceAttr,
 		addSource:   h.addSource,
 	}
 }
 
-// Handle formats a given record in a human-friendly but still largely
-// structured way.
-func (h *handler) Handle(_ context.Context, r slog.Record) error {
-	h.mu.Lock()
-	fmt.Fprintf(&h.s, "%s | %s |", r.Level.String(), r.Message)
-	h.mu.Unlock()
-	groups := h.goa.Apply(h.formatAttr)
-	r.Attrs(func(a slog.Attr) {
-		h.formatAttr(groups, a)
-	})
-	if h.addSource {
-		// Skip slog.log, Handle, h.handle.
-		sourceAttr := h.newSourceAttr(3)
-		h.formatAttr(nil, sourceAttr)
+func (h *handler) appendLevel(buf *buffer.Buffer) {
+	if lVal, ok := levelValues[h.level.Level()]; ok {
+		buf.WriteString(lVal)
+		return
 	}
-	timeAttr := slog.String(slog.TimeKey, r.Time.Format(h.timeFormat))
-	h.formatAttr(nil, timeAttr)
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	_, err := fmt.Fprintln(h.w, h.s.String())
-	h.s.Reset()
-	return err
+	buf.WriteByte(' ')
+	buf.WriteString(h.level.Level().String())
+	buf.WriteString(" |")
 }
 
-func (h *handler) formatAttr(groups []string, a slog.Attr) {
-	if a.Value.Kind() == slog.KindGroup {
-		gs := a.Value.Group()
-		if len(gs) == 0 {
-			return
+func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr) {
+	if a.Value.Kind() != slog.KindGroup {
+		if h.replaceAttr != nil {
+			a = h.replaceAttr(h.groups, a)
+			if a.Equal(slog.Attr{}) {
+				return
+			}
 		}
-		if a.Key != "" {
-			groups = append(groups, a.Key)
-		}
-		for _, g := range gs {
-			h.formatAttr(groups, g)
-		}
+		appendKey(buf, h.groups, a.Key)
+		h.appendVal(buf, a.Value)
 		return
 	}
-	if h.replaceAttr != nil {
-		a = h.replaceAttr(groups, a)
+	if a.Key != "" {
+		h.groups = append(h.groups, a.Key)
 	}
-	key := a.Key
-	if key == "" {
-		return
+	for _, a := range a.Value.Group() {
+		h.appendAttr(buf, a)
 	}
+	if a.Key != "" {
+		h.groups = h.groups[:len(h.groups)-1]
+	}
+}
+
+func appendKey(buf *buffer.Buffer, groups []string, key string) {
+	buf.WriteByte(' ')
 	if len(groups) > 0 {
 		key = strings.Join(groups, ".") + "." + key
 	}
-	h.writeAttr(slog.Any(key, a.Value))
+	if needsQuoting(key) {
+		*buf = strconv.AppendQuote(*buf, key)
+	} else {
+		buf.WriteString(key)
+	}
+	buf.WriteByte('=')
 }
 
-func (h *handler) writeAttr(a slog.Attr) {
-	k := a.Key
-	if needsQuoting(k) {
-		k = fmt.Sprintf("%q", k)
+func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
+	switch val.Kind() {
+	case slog.KindString:
+		appendString(buf, val.String())
+	case slog.KindInt64:
+		*buf = strconv.AppendInt(*buf, val.Int64(), 10)
+	case slog.KindUint64:
+		*buf = strconv.AppendUint(*buf, val.Uint64(), 10)
+	case slog.KindFloat64:
+		*buf = strconv.AppendFloat(*buf, val.Float64(), 'g', -1, 64)
+	case slog.KindBool:
+		*buf = strconv.AppendBool(*buf, val.Bool())
+	case slog.KindDuration:
+		appendString(buf, val.Duration().String())
+	case slog.KindTime:
+		// If fmt contains any quote characters, this won't
+		// properly quote it. But alternative versions run far slower.
+		// If the user must have a time with quotes, they can use
+		// ReplaceAttr to change the King to slog.String.
+		quoteTime := needsQuoting(h.timeFormat)
+		if quoteTime {
+			buf.WriteByte('"')
+		}
+		*buf = val.Time().AppendFormat(*buf, h.timeFormat)
+		if quoteTime {
+			buf.WriteByte('"')
+		}
+	case slog.KindAny, slog.KindGroup, slog.KindLogValuer:
+		if tm, ok := val.Any().(encoding.TextMarshaler); ok {
+			data, err := tm.MarshalText()
+			if err != nil {
+				// TODO: append an error?
+				return
+			}
+			appendString(buf, string(data))
+			return
+		}
+		appendString(buf, fmt.Sprint(val.Any()))
+	default:
+		// TODO: should this return instead of calling panic?
+		panic(fmt.Sprintf("bad kind: %s", val.Kind()))
 	}
-	v := a.Value.String()
-	if needsQuoting(v) {
-		v = fmt.Sprintf("%q", v)
-	}
-	h.mu.Lock()
-	fmt.Fprintf(&h.s, " %s=%s", k, v)
-	h.mu.Unlock()
 }
 
-func (h *handler) newSourceAttr(calldepth int) slog.Attr {
-	// Add 1 to calldepth for this function.
-	calldepth++
-	_, file, line, ok := runtime.Caller(calldepth)
-	if !ok {
-		file = "???"
-		line = 0
+func appendString(buf *buffer.Buffer, s string) {
+	if needsQuoting(s) {
+		*buf = strconv.AppendQuote(*buf, s)
+	} else {
+		buf.WriteString(s)
 	}
-	return slog.String(slog.SourceKey, fmt.Sprintf("%s:%d", file, line))
+}
+
+func (h *handler) newSourceAttr(pc uintptr) slog.Attr {
+	source := frame(pc)
+	info := fmt.Sprintf("%s:%d", source.File, source.Line)
+	return slog.String(slog.SourceKey, info)
+}
+
+func frame(pc uintptr) runtime.Frame {
+	fs := runtime.CallersFrames([]uintptr{pc})
+	f, _ := fs.Next()
+	return f
 }
 
 func needsQuoting(s string) bool {
 	for i := 0; i < len(s); {
 		b := s[i]
 		if b < utf8.RuneSelf {
-			if !safeSet[b] {
+			if unsafe[b] {
 				return true
 			}
 			i++
@@ -200,105 +305,12 @@ func needsQuoting(s string) bool {
 // Adapted from log/slog/json_handler.go which copied the original from
 // encoding/json/tables.go.
 //
-// safeSet holds the value true if the ASCII character with the given array
-// position can be represented as a logfmt key or value without being quoted.
+// unsafe holds the value true if the ASCII character requires a logfmt key or
+// value to be quoted.
 //
-// All values are true except for ' ', '"', and '='.
-var safeSet = [utf8.RuneSelf]bool{
-	' ':      false,
-	'!':      true,
-	'"':      false,
-	'#':      true,
-	'$':      true,
-	'%':      true,
-	'&':      true,
-	'\'':     true,
-	'(':      true,
-	')':      true,
-	'*':      true,
-	'+':      true,
-	',':      true,
-	'-':      true,
-	'.':      true,
-	'/':      true,
-	'0':      true,
-	'1':      true,
-	'2':      true,
-	'3':      true,
-	'4':      true,
-	'5':      true,
-	'6':      true,
-	'7':      true,
-	'8':      true,
-	'9':      true,
-	':':      true,
-	';':      true,
-	'<':      true,
-	'=':      false,
-	'>':      true,
-	'?':      true,
-	'@':      true,
-	'A':      true,
-	'B':      true,
-	'C':      true,
-	'D':      true,
-	'E':      true,
-	'F':      true,
-	'G':      true,
-	'H':      true,
-	'I':      true,
-	'J':      true,
-	'K':      true,
-	'L':      true,
-	'M':      true,
-	'N':      true,
-	'O':      true,
-	'P':      true,
-	'Q':      true,
-	'R':      true,
-	'S':      true,
-	'T':      true,
-	'U':      true,
-	'V':      true,
-	'W':      true,
-	'X':      true,
-	'Y':      true,
-	'Z':      true,
-	'[':      true,
-	'\\':     true,
-	']':      true,
-	'^':      true,
-	'_':      true,
-	'`':      true,
-	'a':      true,
-	'b':      true,
-	'c':      true,
-	'd':      true,
-	'e':      true,
-	'f':      true,
-	'g':      true,
-	'h':      true,
-	'i':      true,
-	'j':      true,
-	'k':      true,
-	'l':      true,
-	'm':      true,
-	'n':      true,
-	'o':      true,
-	'p':      true,
-	'q':      true,
-	'r':      true,
-	's':      true,
-	't':      true,
-	'u':      true,
-	'v':      true,
-	'w':      true,
-	'x':      true,
-	'y':      true,
-	'z':      true,
-	'{':      true,
-	'|':      true,
-	'}':      true,
-	'~':      true,
-	'\u007f': true,
+// All values are safe except for ' ', '"', and '='. Note that a map is far slower.
+var unsafe = [utf8.RuneSelf]bool{
+	' ': true,
+	'"': true,
+	'=': true,
 }

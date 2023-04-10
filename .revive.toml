@@ -29,7 +29,7 @@ warningCode = 0
 [rule.unreachable-code]
 [rule.redefines-builtin-id]
 [rule.cyclomatic]
-  arguments = [10]
+  arguments = [15]
 [rule.cognitive-complexity]
   arguments = [15]
 [rule.get-return]

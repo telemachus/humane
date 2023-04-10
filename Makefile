@@ -22,4 +22,7 @@ test:
 testv:
 	go test -shuffle on -v .
 
-.PHONY: fmt revive lint build install test testv
+bench:
+	go test -bench=. -benchmem -benchtime=5s -count=3 -run=NONE
+
+.PHONY: fmt revive lint build install test testv bench

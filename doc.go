@@ -1,6 +1,6 @@
-// Package humane provides a slog.Handler for a human-friendly version of logfmt.
-// The idea for this format comes from Brandur Leach in his original post about
-// logfmt. See https://brandur.org/logfmt#human for the inspiration.
+// Package humane provides a [log/slog.Handler] for a human-friendly version of
+// logfmt. The idea for this format comes from Brandur Leach in his original
+// post about logfmt. (In particular, [this is the inspiration].)
 //
 // Examples:
 //
@@ -28,10 +28,10 @@
 //			TimeFormat:  time.Kitchen,
 //			AddSource:   true,
 //		}
-//		logger := slog.New(ho.NewHandler(os.Stdout))
+//		logger := slog.New(ho.NewHandler(os.Stderr))
 //		// ... later
 //		logger.Error("Message", "error", err, "response", respStatus)
 //	}
 //
-// [this section of the post]: https://brandur.org/logfmt#human
+// [this is the inspiration]: https://brandur.org/logfmt#human
 package humane
