@@ -112,8 +112,9 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	if len(h.attrs) > 0 {
 		buf.WriteString(h.attrs)
 	}
-	r.Attrs(func(a slog.Attr) {
+	r.Attrs(func(a slog.Attr) bool {
 		h.appendAttr(buf, a)
+		return true
 	})
 	if h.addSource && r.PC != 0 {
 		sourceAttr := h.newSourceAttr(r.PC)
