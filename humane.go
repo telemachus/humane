@@ -5,7 +5,9 @@ import (
 	"encoding"
 	"fmt"
 	"io"
+	"log/slog"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,8 +15,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/telemachus/humane/internal/buffer"
-	"golang.org/x/exp/slices"
-	"golang.org/x/exp/slog"
 )
 
 var (
@@ -30,7 +30,7 @@ var (
 
 type handler struct {
 	w           io.Writer
-	mu          sync.Mutex
+	mu          *sync.Mutex
 	level       slog.Leveler
 	groups      []string
 	attrs       string
@@ -66,21 +66,20 @@ type Options struct {
 	AddSource   bool
 }
 
-// NewHandler returns a [log/slog.Handler] using default options.
-func NewHandler(w io.Writer) slog.Handler {
-	return Options{}.NewHandler(w)
-}
-
 // NewHandler returns a [log/slog.Handler] using the receiver's options.
-func (opts Options) NewHandler(w io.Writer) slog.Handler {
+// Default options are used if opts is nil.
+func NewHandler(w io.Writer, opts *Options) slog.Handler {
+	if opts == nil {
+		opts = &Options{}
+	}
 	h := &handler{
 		w:           w,
+		mu:          &sync.Mutex{},
 		level:       opts.Level,
 		timeFormat:  opts.TimeFormat,
 		replaceAttr: opts.ReplaceAttr,
 		addSource:   opts.AddSource,
 	}
-	// TODO: should this also use sync.Pool?
 	h.groups = make([]string, 0, 10)
 	if opts.Level == nil {
 		h.level = defaultLevel
@@ -165,6 +164,7 @@ func (h *handler) WithGroup(name string) slog.Handler {
 func (h *handler) clone() *handler {
 	return &handler{
 		w:           h.w,
+		mu:          h.mu,
 		level:       h.level,
 		groups:      slices.Clip(h.groups),
 		attrs:       h.attrs,
@@ -185,25 +185,29 @@ func (h *handler) appendLevel(buf *buffer.Buffer) {
 }
 
 func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr) {
-	if a.Value.Kind() != slog.KindGroup {
-		if h.replaceAttr != nil {
-			a = h.replaceAttr(h.groups, a)
-			if a.Equal(slog.Attr{}) {
-				return
-			}
+	a.Value = a.Value.Resolve()
+	if a.Value.Kind() == slog.KindGroup {
+		attrs := a.Value.Group()
+		if len(attrs) == 0 {
+			return
 		}
-		appendKey(buf, h.groups, a.Key)
-		h.appendVal(buf, a.Value)
+		if a.Key != "" {
+			h.groups = append(h.groups, a.Key)
+		}
+		for _, a := range attrs {
+			h.appendAttr(buf, a)
+		}
+		if a.Key != "" {
+			h.groups = h.groups[:len(h.groups)-1]
+		}
 		return
 	}
-	if a.Key != "" {
-		h.groups = append(h.groups, a.Key)
+	if h.replaceAttr != nil {
+		a = h.replaceAttr(h.groups, a)
 	}
-	for _, a := range a.Value.Group() {
-		h.appendAttr(buf, a)
-	}
-	if a.Key != "" {
-		h.groups = h.groups[:len(h.groups)-1]
+	if !a.Equal(slog.Attr{}) {
+		appendKey(buf, h.groups, a.Key)
+		h.appendVal(buf, a.Value)
 	}
 }
 
@@ -238,7 +242,7 @@ func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
 		// If fmt contains any quote characters, this won't
 		// properly quote it. But alternative versions run far slower.
 		// If the user must have a time with quotes, they can use
-		// ReplaceAttr to change the King to slog.String.
+		// ReplaceAttr to change the Kind to slog.String.
 		quoteTime := needsQuoting(h.timeFormat)
 		if quoteTime {
 			buf.WriteByte('"')
@@ -251,16 +255,13 @@ func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
 		if tm, ok := val.Any().(encoding.TextMarshaler); ok {
 			data, err := tm.MarshalText()
 			if err != nil {
-				// TODO: append an error?
+				// TODO: should this append an error?
 				return
 			}
 			appendString(buf, string(data))
 			return
 		}
 		appendString(buf, fmt.Sprint(val.Any()))
-	default:
-		// TODO: should this return instead of calling panic?
-		panic(fmt.Sprintf("bad kind: %s", val.Kind()))
 	}
 }
 

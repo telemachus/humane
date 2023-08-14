@@ -3,12 +3,12 @@ package humane_test
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/telemachus/humane"
-	"golang.org/x/exp/slog"
 )
 
 func removeTime(groups []string, a slog.Attr) slog.Attr {
@@ -29,11 +29,17 @@ func removeTimeTrimSource(_ []string, a slog.Attr) slog.Attr {
 	}
 }
 
+func TestHumaneNilOpts(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	slog.New(humane.NewHandler(&buf, nil))
+}
+
 func TestHumaneBasic(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	ho := humane.Options{ReplaceAttr: removeTime}
-	logger := slog.New(ho.NewHandler(&buf))
+	opts := &humane.Options{ReplaceAttr: removeTime}
+	logger := slog.New(humane.NewHandler(&buf, opts))
 	logger.Info("foo")
 	got := buf.String()
 	want := " INFO | foo |\n"
@@ -45,8 +51,8 @@ func TestHumaneBasic(t *testing.T) {
 func TestKeepTimeKeyInGroup(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	ho := humane.Options{ReplaceAttr: removeTime}
-	logger := slog.New(ho.NewHandler(&buf))
+	opts := &humane.Options{ReplaceAttr: removeTime}
+	logger := slog.New(humane.NewHandler(&buf, opts))
 	logger.WithGroup("request").Info("foo", slog.String("time", "3:00pm"))
 	got := buf.String()
 	want := " INFO | foo | request.time=3:00pm\n"
@@ -58,8 +64,8 @@ func TestKeepTimeKeyInGroup(t *testing.T) {
 func TestHumaneCustomLevel(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	ho := humane.Options{ReplaceAttr: removeTime, Level: slog.LevelError}
-	logger := slog.New(ho.NewHandler(&buf))
+	opts := &humane.Options{ReplaceAttr: removeTime, Level: slog.LevelError}
+	logger := slog.New(humane.NewHandler(&buf, opts))
 	logger.Info("wtf?")
 	got := buf.String()
 	want := ""
@@ -71,11 +77,11 @@ func TestHumaneCustomLevel(t *testing.T) {
 func TestHumaneAddSource(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	ho := humane.Options{ReplaceAttr: removeTimeTrimSource, AddSource: true}
-	logger := slog.New(ho.NewHandler(&buf))
+	opts := &humane.Options{ReplaceAttr: removeTimeTrimSource, AddSource: true}
+	logger := slog.New(humane.NewHandler(&buf, opts))
 	logger.Info("foo")
 	got := buf.String()
-	want := " INFO | foo | source=humane_test.go:76\n"
+	want := " INFO | foo | source=humane_test.go:82\n"
 	if got != want {
 		t.Errorf(`logger.Info("foo") = %q; want %q`, got, want)
 	}
@@ -85,8 +91,8 @@ func TestHumaneCustomTimeFormat(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
 	timeFormat := "2006-01-02"
-	ho := humane.Options{TimeFormat: timeFormat}
-	logger := slog.New(ho.NewHandler(&buf))
+	opts := &humane.Options{TimeFormat: timeFormat}
+	logger := slog.New(humane.NewHandler(&buf, opts))
 	logger.Info("foo")
 	got := buf.String()
 	want := fmt.Sprintf(
@@ -102,8 +108,8 @@ func TestHumaneCustomTimeFormat(t *testing.T) {
 func TestHumaneSlogGroup(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	ho := humane.Options{ReplaceAttr: removeTime}
-	logger := slog.New(ho.NewHandler(&buf))
+	opts := &humane.Options{ReplaceAttr: removeTime}
+	logger := slog.New(humane.NewHandler(&buf, opts))
 	logger.Info("message",
 		slog.Group(
 			"foo",
@@ -125,8 +131,8 @@ func TestHumaneSlogGroup(t *testing.T) {
 func TestHumaneWithGroup(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	ho := humane.Options{ReplaceAttr: removeTime}
-	logger := slog.New(ho.NewHandler(&buf).WithGroup("GROUP"))
+	opts := &humane.Options{ReplaceAttr: removeTime}
+	logger := slog.New(humane.NewHandler(&buf, opts).WithGroup("GROUP"))
 	logger.Info("message",
 		slog.Group(
 			"foo",
@@ -152,9 +158,9 @@ func TestHumaneWithGroup(t *testing.T) {
 func TestHumaneWithAttrs(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	ho := humane.Options{ReplaceAttr: removeTime}
+	opts := &humane.Options{ReplaceAttr: removeTime}
 	logger := slog.New(
-		ho.NewHandler(&buf).WithAttrs(
+		humane.NewHandler(&buf, opts).WithAttrs(
 			[]slog.Attr{slog.Int("c", 3), slog.String("foo", "bar")},
 		),
 	)
@@ -176,8 +182,8 @@ func TestHumaneWithAttrs(t *testing.T) {
 func TestHumaneWithGroupWithAttrs(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	ho := humane.Options{ReplaceAttr: removeTime}
-	logger := slog.New(ho.NewHandler(&buf))
+	opts := &humane.Options{ReplaceAttr: removeTime}
+	logger := slog.New(humane.NewHandler(&buf, opts))
 	logger = logger.WithGroup("g").With("a", 1).WithGroup("h").With("b", 2)
 	logger.Info("message")
 	got := buf.String()
@@ -237,8 +243,8 @@ func TestHumaneNeedsQuoting(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var buf bytes.Buffer
-			ho := humane.Options{ReplaceAttr: removeTime}
-			logger := slog.New(ho.NewHandler(&buf))
+			opts := &humane.Options{ReplaceAttr: removeTime}
+			logger := slog.New(humane.NewHandler(&buf, opts))
 			logger.Info("message", tc.args...)
 			got := buf.String()
 			if got != tc.want {

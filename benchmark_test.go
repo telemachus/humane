@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/telemachus/humane"
-	"golang.org/x/exp/slog"
 )
 
 var (
@@ -30,7 +30,7 @@ var slogAttrs = []slog.Attr{
 }
 
 func BenchmarkSlog(b *testing.B) {
-	logger := slog.New(slog.NewTextHandler(io.Discard))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -44,7 +44,7 @@ func BenchmarkSlog(b *testing.B) {
 }
 
 func BenchmarkHumane(b *testing.B) {
-	logger := slog.New(humane.NewHandler(io.Discard))
+	logger := slog.New(humane.NewHandler(io.Discard, nil))
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {

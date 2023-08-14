@@ -6,7 +6,7 @@
 //
 // 1. Get a slog logger using humane's handler with default options:
 //
-//	logger := slog.New(humane.NewHandler(os.Stdout))
+//	logger := slog.New(humane.NewHandler(os.Stdout, nil))
 //	logger.Info("Message", "foo", "bar", "bizz", "buzz")
 //
 // 2. Get a slog logger using humane's handler with customized options:
@@ -22,13 +22,13 @@
 //	}
 //
 //	func main() {
-//		ho := humane.Options{
+//		opts := &humane.Options{
 //			Level:       slog.LevelError,
 //			ReplaceAttr: trimSource,
 //			TimeFormat:  time.Kitchen,
 //			AddSource:   true,
 //		}
-//		logger := slog.New(ho.NewHandler(os.Stderr))
+//		logger := slog.New(humane.NewHandler(os.Stderr, opts))
 //		// ... later
 //		logger.Error("Message", "error", err, "response", respStatus)
 //	}

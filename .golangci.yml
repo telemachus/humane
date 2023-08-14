@@ -1,4 +1,18 @@
 linters-settings:
+  depguard:
+      rules:
+        main:
+          files:
+            - $all
+          deny:
+            - pkg: reflect
+              desc: "avoid reflect"
+        test:
+          files:
+            - $all
+          deny:
+            - pkg: reflect
+              desc: "avoid reflect"
   errcheck:
     check-type-assertions: true
     check-blank: true
@@ -9,6 +23,8 @@ linters-settings:
       - fmt.Fprintln
       - (*github.com/telemachus/humane/internal/buffer.Buffer).WriteByte
       - (*github.com/telemachus/humane/internal/buffer.Buffer).WriteString
+  exhaustive:
+    default-signifies-exhaustive: true
   goconst:
     min-len: 2
     min-occurrences: 3
