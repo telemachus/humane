@@ -49,7 +49,7 @@ logger.Error("Ooops", slog.Any("error", err))
 // ERROR | Ooops | error="error message" time="2023-04-02T10:50.09 EDT"
 
 // You can also set options.  Again, see the next section for more details.
-opts := humane.Options{
+opts := &humane.Options{
     Level: slog.LevelError,
     TimeFormat: time.RFC3339
 }
@@ -93,7 +93,7 @@ func removeTime(_ []string, a slog.Attr) slog.Attr {
     }
     return a
 }
-opts := humane.Options{ReplaceAttr: removeTime}
+opts := &humane.Options{ReplaceAttr: removeTime}
 logger := slog.New(humane.NewHandler(os.Stdout, opts))
 ```
 
