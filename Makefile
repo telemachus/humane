@@ -4,10 +4,7 @@ fmt:
 	golangci-lint run --disable-all --no-config -Egofmt --fix
 	golangci-lint run --disable-all --no-config -Egofumpt --fix
 
-revive: fmt
-	revive -config .revive.toml
-
-lint: revive
+lint: fmt
 	golangci-lint run
 
 build: lint
@@ -25,4 +22,4 @@ testv:
 bench:
 	go test -bench=. -benchmem -benchtime=5s -count=3 -run=NONE
 
-.PHONY: fmt revive lint build install test testv bench
+.PHONY: fmt lint build install test testv bench
