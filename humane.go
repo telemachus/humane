@@ -104,11 +104,11 @@ func (h *handler) Enabled(_ context.Context, l slog.Level) bool {
 func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	buf := buffer.New()
 	defer buf.Free()
-	h.appendLevel(buf)
+	h.appendLevel(buf, r.Level)
 	buf.WriteByte(' ')
 	buf.WriteString(r.Message)
 	buf.WriteString(" |")
-	if len(h.attrs) > 0 {
+	if h.attrs != "" {
 		buf.WriteString(h.attrs)
 	}
 	r.Attrs(func(a slog.Attr) bool {
@@ -174,13 +174,13 @@ func (h *handler) clone() *handler {
 	}
 }
 
-func (h *handler) appendLevel(buf *buffer.Buffer) {
-	if lVal, ok := levelValues[h.level.Level()]; ok {
+func (h *handler) appendLevel(buf *buffer.Buffer, level slog.Level) {
+	if lVal, ok := levelValues[level.Level()]; ok {
 		buf.WriteString(lVal)
 		return
 	}
 	buf.WriteByte(' ')
-	buf.WriteString(h.level.Level().String())
+	buf.WriteString(level.Level().String())
 	buf.WriteString(" |")
 }
 

@@ -1,5 +1,10 @@
 # humane version history
 
+# v0.6.0
+
++ Fix a bug (found thanks to a user): display the level of the record not the
+  handler (!).
+
 # v0.5.0
 
 + Switch from `exp/slog` to `log/slog` and from `exp/slices` to `slices` now
