@@ -51,7 +51,7 @@ func parseHumane(bs []byte) (map[string]any, error) {
 	// that contains a space. For this test, however, this will work---as
 	// long as I make sure to set a time format without whitespace.
 	s = pieces[2]
-	for len(s) > 0 {
+	for s != "" {
 		kv, rest, _ := strings.Cut(s, " ")
 		k, value, found := strings.Cut(kv, "=")
 		if !found {

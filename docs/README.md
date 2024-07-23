@@ -51,7 +51,7 @@ logger.Error("Ooops", slog.Any("error", err))
 // You can also set options.  Again, see the next section for more details.
 opts := &humane.Options{
     Level: slog.LevelError,
-    TimeFormat: time.RFC3339
+    TimeFormat: time.RFC3339,
 }
 logger := slog.New(humane.NewHandler(os.Stderr, opts))
 logger.Info("This message will not be written")
