@@ -38,7 +38,9 @@ linters-settings:
       - performance
       - style
   govet:
-    check-shadowing: true
+    enable-all: true
+    shadow:
+      strict: true
   nolintlint:
     require-explanation: true
     require-specific: true
@@ -47,6 +49,7 @@ linters:
   disable-all: true
   enable:
     - bodyclose
+    - copyloopvar
     - depguard
     - dogsled
     - dupl
@@ -54,7 +57,6 @@ linters:
     - errchkjson
     - errname
     - errorlint
-    - exportloopref
     - exhaustive
     - goconst
     - gocritic
@@ -80,5 +82,7 @@ linters:
 
 run:
   issues-exit-code: 1
-  skip-dirs:
+
+issues:
+  exclude-dirs:
     - internal

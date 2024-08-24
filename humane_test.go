@@ -198,8 +198,8 @@ func TestHumaneNeedsQuoting(t *testing.T) {
 	testCases := []struct {
 		name string
 		desc string
-		args []any
 		want string
+		args []any
 	}{
 		{
 			name: "space in value",
@@ -239,7 +239,6 @@ func TestHumaneNeedsQuoting(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var buf bytes.Buffer

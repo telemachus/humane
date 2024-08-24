@@ -30,12 +30,12 @@ var (
 
 type handler struct {
 	w           io.Writer
-	mu          *sync.Mutex
 	level       slog.Leveler
-	groups      []string
+	mu          *sync.Mutex
+	replaceAttr func(groups []string, a slog.Attr) slog.Attr
 	attrs       string
 	timeFormat  string
-	replaceAttr func(groups []string, a slog.Attr) slog.Attr
+	groups      []string
 	addSource   bool
 }
 
