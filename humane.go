@@ -104,7 +104,7 @@ func (h *handler) Enabled(_ context.Context, l slog.Level) bool {
 func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	buf := buffer.New()
 	defer buf.Free()
-	h.appendLevel(buf, r.Level)
+	appendLevel(buf, r.Level)
 	buf.WriteByte(' ')
 	buf.WriteString(r.Message)
 	buf.WriteString(" |")
@@ -116,7 +116,7 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 		return true
 	})
 	if h.addSource && r.PC != 0 {
-		sourceAttr := h.newSourceAttr(r.PC)
+		sourceAttr := newSourceAttr(r.PC)
 		h.appendAttr(buf, sourceAttr)
 	}
 	timeAttr := slog.Time(slog.TimeKey, r.Time)
@@ -174,7 +174,7 @@ func (h *handler) clone() *handler {
 	}
 }
 
-func (h *handler) appendLevel(buf *buffer.Buffer, level slog.Level) {
+func appendLevel(buf *buffer.Buffer, level slog.Level) {
 	if lVal, ok := levelValues[level.Level()]; ok {
 		buf.WriteString(lVal)
 		return
@@ -273,7 +273,7 @@ func appendString(buf *buffer.Buffer, s string) {
 	}
 }
 
-func (h *handler) newSourceAttr(pc uintptr) slog.Attr {
+func newSourceAttr(pc uintptr) slog.Attr {
 	source := frame(pc)
 	info := fmt.Sprintf("%s:%d", source.File, source.Line)
 	return slog.String(slog.SourceKey, info)
