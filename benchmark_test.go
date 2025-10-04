@@ -33,7 +33,7 @@ func BenchmarkSlog(b *testing.B) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		logger.LogAttrs(
 			context.Background(),
 			slog.LevelInfo,
@@ -47,7 +47,7 @@ func BenchmarkHumane(b *testing.B) {
 	logger := slog.New(humane.NewHandler(io.Discard, nil))
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		logger.LogAttrs(
 			context.Background(),
 			slog.LevelInfo,
