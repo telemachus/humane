@@ -102,6 +102,7 @@ func (h *handler) Enabled(_ context.Context, l slog.Level) bool {
 // Handle formats a given record in a human-friendly but still largely
 // structured way.
 func (h *handler) Handle(_ context.Context, r slog.Record) error {
+	// Use slog's pooled buffer to minimize allocations.
 	buf := buffer.New()
 	defer buf.Free()
 	appendLevel(buf, r.Level)
