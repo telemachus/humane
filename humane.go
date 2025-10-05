@@ -257,7 +257,7 @@ func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
 		if tm, ok := val.Any().(encoding.TextMarshaler); ok {
 			data, err := tm.MarshalText()
 			if err != nil {
-				// TODO: should this append an error?
+				appendString(buf, fmt.Sprintf("!ERROR:%v", err))
 				return
 			}
 			appendString(buf, string(data))
