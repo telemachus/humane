@@ -2,9 +2,13 @@ package humane_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,9 +83,10 @@ func TestHumaneAddSource(t *testing.T) {
 	var buf bytes.Buffer
 	opts := &humane.Options{ReplaceAttr: removeTimeTrimSource, AddSource: true}
 	logger := slog.New(humane.NewHandler(&buf, opts))
+	_, _, line, _ := runtime.Caller(0) //nolint:dogsled // This is an ugly but normal use of runtime.Caller.
 	logger.Info("foo")
+	want := fmt.Sprintf(" INFO | foo | source=humane_test.go:%d\n", line+1)
 	got := buf.String()
-	want := " INFO | foo | source=humane_test.go:82\n"
 	if got != want {
 		t.Errorf(`logger.Info("foo") = %q; want %q`, got, want)
 	}
@@ -250,5 +255,65 @@ func TestHumaneNeedsQuoting(t *testing.T) {
 				t.Errorf("%s got %q; want %q", tc.desc, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestHumaneConcurrentGroupHandling(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	opts := &humane.Options{ReplaceAttr: removeTime}
+	handler := humane.NewHandler(&buf, opts)
+
+	// Test that concurrent logging with nested groups works safely.
+	records := []slog.Record{
+		func() slog.Record {
+			r := slog.NewRecord(time.Now(), slog.LevelInfo, "msg1", 0)
+			r.AddAttrs(slog.Group("req",
+				slog.Group("db", slog.String("query", "SELECT")),
+				slog.String("id", "123")))
+			return r
+		}(),
+		func() slog.Record {
+			r := slog.NewRecord(time.Now(), slog.LevelWarn, "msg2", 0)
+			r.AddAttrs(slog.Group("auth",
+				slog.String("user", "alice"),
+				slog.Group("perms", slog.Bool("admin", false))))
+			return r
+		}(),
+	}
+
+	const numGoroutines = 100
+	const recordsPerGoroutine = 10
+	var wg sync.WaitGroup
+
+	// This channel will synchronize start of goroutines for maximum race potential.
+	start := make(chan struct{})
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+
+			for j := 0; j < recordsPerGoroutine; j++ {
+				record := records[j%len(records)]
+				err := handler.Handle(context.Background(), record)
+				if err != nil {
+					t.Errorf("Handle failed: %v", err)
+				}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+
+	output := buf.String()
+	if !strings.Contains(output, "req.db.query=") {
+		t.Error("Expected nested group output not found")
+	}
+	if !strings.Contains(output, "auth.perms.admin=") {
+		t.Error("Expected nested group output not found")
 	}
 }
