@@ -240,6 +240,7 @@ func appendKey(buf *buffer.Buffer, groups, key string) {
 	buf.WriteByte('=')
 }
 
+//nolint:cyclop // This function simply *is* complex.
 func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
 	switch val.Kind() {
 	case slog.KindString:
