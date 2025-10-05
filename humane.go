@@ -240,9 +240,10 @@ func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
 	case slog.KindDuration:
 		appendString(buf, val.Duration().String())
 	case slog.KindTime:
-		// If fmt contains any quote characters, this won't
-		// properly quote it. But alternative versions run far slower.
-		// If the user must have a time with quotes, they can use
+		// This is crude: if timeFormat needs quoting, we simply quote
+		// the entire formatted time string.
+		//
+		// If the user must have a time with quotes, they should use
 		// ReplaceAttr to change the Kind to slog.String.
 		quoteTime := needsQuoting(h.timeFormat)
 		if quoteTime {
@@ -289,6 +290,7 @@ func frame(pc uintptr) runtime.Frame {
 func needsQuoting(s string) bool {
 	for i := 0; i < len(s); {
 		b := s[i]
+		// Handle ASCII characters quickly.
 		if b < utf8.RuneSelf {
 			if unsafe[b] {
 				return true
