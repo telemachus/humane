@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,8 +33,8 @@ type handler struct {
 	mu          *sync.Mutex
 	replaceAttr func(groups []string, a slog.Attr) slog.Attr
 	attrs       string
+	groups      string
 	timeFormat  string
-	groups      []string
 	addSource   bool
 }
 
@@ -80,7 +79,6 @@ func NewHandler(w io.Writer, opts *Options) slog.Handler {
 		replaceAttr: opts.ReplaceAttr,
 		addSource:   opts.AddSource,
 	}
-	h.groups = make([]string, 0, 10)
 	if opts.Level == nil {
 		h.level = defaultLevel
 	}
@@ -113,19 +111,19 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 		buf.WriteString(h.attrs)
 	}
 	r.Attrs(func(a slog.Attr) bool {
-		h.appendAttr(buf, a)
+		h.appendAttr(buf, a, h.groups)
 		return true
 	})
 	if h.addSource && r.PC != 0 {
 		sourceAttr := newSourceAttr(r.PC)
-		h.appendAttr(buf, sourceAttr)
+		h.appendAttr(buf, sourceAttr, h.groups)
 	}
 	timeAttr := slog.Time(slog.TimeKey, r.Time)
 	if h.replaceAttr != nil {
 		timeAttr = h.replaceAttr(nil, timeAttr)
 	}
 	if !r.Time.IsZero() && !timeAttr.Equal(slog.Attr{}) {
-		appendKey(buf, nil, timeAttr.Key)
+		appendKey(buf, "", timeAttr.Key)
 		h.appendVal(buf, timeAttr.Value)
 	}
 	buf.WriteByte('\n')
@@ -145,7 +143,7 @@ func (h *handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	buf := buffer.New()
 	defer buf.Free()
 	for _, a := range attrs {
-		h2.appendAttr(buf, a)
+		h2.appendAttr(buf, a, h.groups)
 	}
 	h2.attrs += string(*buf)
 	return h2
@@ -158,7 +156,13 @@ func (h *handler) WithGroup(name string) slog.Handler {
 		return h
 	}
 	h2 := h.clone()
-	h2.groups = append(h2.groups, name)
+	// Format group strings in advance for performance.
+	// See https://github.com/golang/example/blob/master/slog-handler-guide/README.md#with-pre-formatting.
+	if h.groups == "" {
+		h2.groups = name
+	} else {
+		h2.groups = h.groups + "." + name
+	}
 	return h2
 }
 
@@ -167,7 +171,7 @@ func (h *handler) clone() *handler {
 		w:           h.w,
 		mu:          h.mu,
 		level:       h.level,
-		groups:      slices.Clip(h.groups),
+		groups:      h.groups,
 		attrs:       h.attrs,
 		timeFormat:  h.timeFormat,
 		replaceAttr: h.replaceAttr,
@@ -185,42 +189,53 @@ func appendLevel(buf *buffer.Buffer, level slog.Level) {
 	buf.WriteString(" |")
 }
 
-func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr) {
+func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groups string) {
 	a.Value = a.Value.Resolve()
 	if a.Value.Kind() == slog.KindGroup {
 		attrs := a.Value.Group()
 		if len(attrs) == 0 {
 			return
 		}
+		var newGroups string
 		if a.Key != "" {
-			h.groups = append(h.groups, a.Key)
+			if groups == "" {
+				newGroups = a.Key
+			} else {
+				newGroups = groups + "." + a.Key
+			}
+		} else {
+			newGroups = groups
 		}
 		for _, a := range attrs {
-			h.appendAttr(buf, a)
-		}
-		if a.Key != "" {
-			h.groups = h.groups[:len(h.groups)-1]
+			h.appendAttr(buf, a, newGroups)
 		}
 		return
 	}
 	if h.replaceAttr != nil {
-		a = h.replaceAttr(h.groups, a)
+		var groupsSlice []string
+		if groups != "" {
+			groupsSlice = strings.Split(groups, ".")
+		}
+		a = h.replaceAttr(groupsSlice, a)
 	}
 	if !a.Equal(slog.Attr{}) {
-		appendKey(buf, h.groups, a.Key)
+		appendKey(buf, groups, a.Key)
 		h.appendVal(buf, a.Value)
 	}
 }
 
-func appendKey(buf *buffer.Buffer, groups []string, key string) {
+func appendKey(buf *buffer.Buffer, groups, key string) {
 	buf.WriteByte(' ')
-	if len(groups) > 0 {
-		key = strings.Join(groups, ".") + "." + key
-	}
-	if needsQuoting(key) {
-		*buf = strconv.AppendQuote(*buf, key)
+	var fullKey string
+	if groups != "" {
+		fullKey = groups + "." + key
 	} else {
-		buf.WriteString(key)
+		fullKey = key
+	}
+	if needsQuoting(fullKey) {
+		*buf = strconv.AppendQuote(*buf, fullKey)
+	} else {
+		buf.WriteString(fullKey)
 	}
 	buf.WriteByte('=')
 }
