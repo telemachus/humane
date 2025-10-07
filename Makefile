@@ -31,10 +31,20 @@ testr:
 testv:
 	go test -shuffle on -v .
 
+bench-quick:
+	go test -bench='Basic|WithGroupChaining|WithAttrsChaining' -benchmem -benchtime=1s -count=3 -run=NONE
+
 bench:
-	go test -bench=. -benchmem -benchtime=5s -count=3 -run=NONE
+	go test -bench=. -benchmem -benchtime=5s -count=10 -run=NONE
+
+bench-baseline:
+	go test -bench=. -benchmem -benchtime=5s -count=10 -run=NONE > bench-baseline.txt
+
+bench-compare:
+	go test -bench=. -benchmem -benchtime=5s -count=10 -run=NONE > bench-new.txt
+	benchstat bench-baseline.txt bench-new.txt
 
 clean:
 	go clean -i -r -cache
 
-.PHONY: fmt staticcheck revive golangci lint build install test testv bench
+.PHONY: fmt staticcheck revive golangci lint build install test testv bench-quick bench bench-baseline bench-compare
