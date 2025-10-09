@@ -7,8 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"runtime"
+	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"unicode"
 	"unicode/utf8"
@@ -33,8 +33,9 @@ type handler struct {
 	mu          *sync.Mutex
 	replaceAttr func(groups []string, a slog.Attr) slog.Attr
 	attrs       string
-	groups      string
+	groupPrefix string
 	timeFormat  string
+	groups      []string
 	addSource   bool
 }
 
@@ -78,6 +79,7 @@ func NewHandler(w io.Writer, opts *Options) slog.Handler {
 		timeFormat:  opts.TimeFormat,
 		replaceAttr: opts.ReplaceAttr,
 		addSource:   opts.AddSource,
+		groups:      make([]string, 0, 10),
 	}
 	if opts.Level == nil {
 		h.level = defaultLevel
@@ -111,12 +113,12 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 		buf.WriteString(h.attrs)
 	}
 	r.Attrs(func(a slog.Attr) bool {
-		h.appendAttr(buf, a, h.groups)
+		h.appendAttr(buf, a, h.groupPrefix, h.groups)
 		return true
 	})
 	if h.addSource && r.PC != 0 {
 		sourceAttr := newSourceAttr(r.PC)
-		h.appendAttr(buf, sourceAttr, h.groups)
+		h.appendAttr(buf, sourceAttr, h.groupPrefix, h.groups)
 	}
 	timeAttr := slog.Time(slog.TimeKey, r.Time)
 	if h.replaceAttr != nil {
@@ -143,7 +145,7 @@ func (h *handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	buf := buffer.New()
 	defer buf.Free()
 	for _, a := range attrs {
-		h2.appendAttr(buf, a, h.groups)
+		h2.appendAttr(buf, a, h.groupPrefix, h.groups)
 	}
 	h2.attrs += string(*buf)
 	return h2
@@ -158,11 +160,12 @@ func (h *handler) WithGroup(name string) slog.Handler {
 	h2 := h.clone()
 	// Format group strings in advance for performance.
 	// See https://github.com/golang/example/blob/master/slog-handler-guide/README.md#with-pre-formatting.
-	if h.groups == "" {
-		h2.groups = name
+	if h.groupPrefix == "" {
+		h2.groupPrefix = name
 	} else {
-		h2.groups = h.groups + "." + name
+		h2.groupPrefix = h.groupPrefix + "." + name
 	}
+	h2.groups = append(h2.groups, name)
 	return h2
 }
 
@@ -171,7 +174,8 @@ func (h *handler) clone() *handler {
 		w:           h.w,
 		mu:          h.mu,
 		level:       h.level,
-		groups:      h.groups,
+		groupPrefix: h.groupPrefix,
+		groups:      slices.Clip(h.groups),
 		attrs:       h.attrs,
 		timeFormat:  h.timeFormat,
 		replaceAttr: h.replaceAttr,
@@ -189,7 +193,7 @@ func appendLevel(buf *buffer.Buffer, level slog.Level) {
 	buf.WriteString(" |")
 }
 
-func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groups string) {
+func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groupPrefix string, groups []string) {
 	a.Value = a.Value.Resolve()
 	if a.Value.Kind() == slog.KindGroup {
 		attrs := a.Value.Group()
@@ -198,28 +202,24 @@ func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groups string) {
 		}
 		var newGroups string
 		if a.Key != "" {
-			if groups == "" {
+			if groupPrefix == "" {
 				newGroups = a.Key
 			} else {
-				newGroups = groups + "." + a.Key
+				newGroups = groupPrefix + "." + a.Key
 			}
 		} else {
-			newGroups = groups
+			newGroups = groupPrefix
 		}
 		for _, a := range attrs {
-			h.appendAttr(buf, a, newGroups)
+			h.appendAttr(buf, a, newGroups, groups)
 		}
 		return
 	}
 	if h.replaceAttr != nil {
-		var groupsSlice []string
-		if groups != "" {
-			groupsSlice = strings.Split(groups, ".")
-		}
-		a = h.replaceAttr(groupsSlice, a)
+		a = h.replaceAttr(groups, a)
 	}
 	if !a.Equal(slog.Attr{}) {
-		appendKey(buf, groups, a.Key)
+		appendKey(buf, groupPrefix, a.Key)
 		h.appendVal(buf, a.Value)
 	}
 }

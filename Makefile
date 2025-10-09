@@ -32,7 +32,7 @@ testv:
 	go test -shuffle on -v .
 
 bench-quick:
-	go test -bench='Basic|WithGroupChaining|WithAttrsChaining' -benchmem -benchtime=1s -count=3 -run=NONE
+	go test -bench='Basic|WithGroupChaining|WithAttrsChaining' -benchmem -benchtime=3s -count=3 -run=NONE
 
 bench:
 	go test -bench=. -benchmem -benchtime=5s -count=10 -run=NONE
