@@ -200,18 +200,25 @@ func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groupPrefix string
 		if len(attrs) == 0 {
 			return
 		}
-		var newGroups string
+		var newGroupPrefix string
+		var newGroups []string
+
 		if a.Key != "" {
 			if groupPrefix == "" {
-				newGroups = a.Key
+				newGroupPrefix = a.Key
 			} else {
-				newGroups = groupPrefix + "." + a.Key
+				newGroupPrefix = groupPrefix + "." + a.Key
 			}
+			newGroups = make([]string, 0, len(groups)+1)
+			newGroups = append(newGroups, groups...)
+			newGroups = append(newGroups, a.Key)
 		} else {
-			newGroups = groupPrefix
+			newGroupPrefix = groupPrefix
+			newGroups = groups
 		}
+
 		for _, a := range attrs {
-			h.appendAttr(buf, a, newGroups, groups)
+			h.appendAttr(buf, a, newGroupPrefix, newGroups)
 		}
 		return
 	}
