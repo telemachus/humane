@@ -85,9 +85,6 @@ linters:
     - unparam
     - unused
     - whitespace
-  exclusions:
-    paths:
-      - 'internal/buffer'
 
 
 run:

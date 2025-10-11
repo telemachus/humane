@@ -199,6 +199,38 @@ func TestHumaneWithGroupWithAttrs(t *testing.T) {
 	}
 }
 
+func TestReplaceAttrGroupsInWithAttrs(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+
+	var receivedGroups [][]string
+	replaceAttr := func(groups []string, a slog.Attr) slog.Attr {
+		if a.Key == slog.TimeKey {
+			return slog.Attr{}
+		}
+		// Record what groups we received for each attr
+		receivedGroups = append(receivedGroups, append([]string(nil), groups...))
+		return a
+	}
+
+	opts := &humane.Options{ReplaceAttr: replaceAttr}
+	logger := slog.New(humane.NewHandler(&buf, opts))
+
+	// Create a logger with groups, then add attrs using With()
+	logger.WithGroup("g1").WithGroup("g2").With("a", "1", "b", "2")
+
+	// ReplaceAttr should have been called twice (for "a" and "b")
+	// and both times should see groups = ["g1", "g2"]
+	want := [][]string{
+		{"g1", "g2"},
+		{"g1", "g2"},
+	}
+
+	if diff := cmp.Diff(want, receivedGroups); diff != "" {
+		t.Errorf("ReplaceAttr groups mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestHumaneNeedsQuoting(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {

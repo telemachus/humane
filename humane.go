@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/telemachus/humane/internal/buffer"
+	"github.com/telemachus/humane/internal/grouppool"
 )
 
 var (
@@ -105,6 +106,16 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	// Use slog's pooled buffer to minimize allocations.
 	buf := buffer.New()
 	defer buf.Free()
+
+	// Use slog's grouppool to minimize allocations but only if ReplaceAttr is set.
+	var groups *[]string
+	hasReplaceAttr := h.replaceAttr != nil
+	if hasReplaceAttr {
+		groups = grouppool.New()
+		defer grouppool.Free(groups)
+		*groups = append(*groups, h.groups...)
+	}
+
 	appendLevel(buf, r.Level)
 	buf.WriteByte(' ')
 	buf.WriteString(r.Message)
@@ -113,16 +124,16 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 		buf.WriteString(h.attrs)
 	}
 	r.Attrs(func(a slog.Attr) bool {
-		h.appendAttr(buf, a, h.groupPrefix, h.groups)
+		h.appendAttr(buf, a, h.groupPrefix, groups)
 		return true
 	})
 	if h.addSource && r.PC != 0 {
 		sourceAttr := newSourceAttr(r.PC)
-		h.appendAttr(buf, sourceAttr, h.groupPrefix, h.groups)
+		h.appendAttr(buf, sourceAttr, h.groupPrefix, groups)
 	}
 	timeAttr := slog.Time(slog.TimeKey, r.Time)
-	if h.replaceAttr != nil {
-		timeAttr = h.replaceAttr(nil, timeAttr)
+	if hasReplaceAttr {
+		timeAttr = h.replaceAttr(nil, timeAttr) // Pass nil, not groups!
 	}
 	if !r.Time.IsZero() && !timeAttr.Equal(slog.Attr{}) {
 		appendKey(buf, "", timeAttr.Key)
@@ -144,8 +155,16 @@ func (h *handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	h2 := h.clone()
 	buf := buffer.New()
 	defer buf.Free()
+
+	var groups *[]string
+	if h.replaceAttr != nil {
+		groups = grouppool.New()
+		defer grouppool.Free(groups)
+		*groups = append(*groups, h.groups...)
+	}
+
 	for _, a := range attrs {
-		h2.appendAttr(buf, a, h.groupPrefix, h.groups)
+		h2.appendAttr(buf, a, h.groupPrefix, groups)
 	}
 	h2.attrs += string(*buf)
 	return h2
@@ -193,7 +212,8 @@ func appendLevel(buf *buffer.Buffer, level slog.Level) {
 	buf.WriteString(" |")
 }
 
-func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groupPrefix string, groups []string) {
+//nolint:cyclop // This function simply *is* complex.
+func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groupPrefix string, groups *[]string) {
 	a.Value = a.Value.Resolve()
 	if a.Value.Kind() == slog.KindGroup {
 		attrs := a.Value.Group()
@@ -201,7 +221,6 @@ func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groupPrefix string
 			return
 		}
 		var newGroupPrefix string
-		var newGroups []string
 
 		if a.Key != "" {
 			if groupPrefix == "" {
@@ -209,21 +228,29 @@ func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groupPrefix string
 			} else {
 				newGroupPrefix = groupPrefix + "." + a.Key
 			}
-			newGroups = make([]string, 0, len(groups)+1)
-			newGroups = append(newGroups, groups...)
-			newGroups = append(newGroups, a.Key)
+			if groups != nil {
+				*groups = append(*groups, a.Key)
+			}
 		} else {
 			newGroupPrefix = groupPrefix
-			newGroups = groups
 		}
 
 		for _, a := range attrs {
-			h.appendAttr(buf, a, newGroupPrefix, newGroups)
+			h.appendAttr(buf, a, newGroupPrefix, groups)
+		}
+
+		if a.Key != "" && groups != nil {
+			*groups = (*groups)[:len(*groups)-1]
 		}
 		return
 	}
+
+	var groupsSlice []string
+	if groups != nil {
+		groupsSlice = *groups
+	}
 	if h.replaceAttr != nil {
-		a = h.replaceAttr(groups, a)
+		a = h.replaceAttr(groupsSlice, a)
 	}
 	if !a.Equal(slog.Attr{}) {
 		appendKey(buf, groupPrefix, a.Key)

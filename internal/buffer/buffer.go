@@ -22,7 +22,7 @@ var bufPool = sync.Pool{
 }
 
 func New() *Buffer {
-	return bufPool.Get().(*Buffer)
+	return bufPool.Get().(*Buffer) //nolint:errcheck // This cannot panic.
 }
 
 func (b *Buffer) Free() {
