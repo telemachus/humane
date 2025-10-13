@@ -136,7 +136,7 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 		return true
 	})
 	if h.addSource {
-		src := r.Source()
+		src := source(r)
 		if src != nil && (src.File != "" || src.Line != 0) {
 			info := fmt.Sprintf("%s:%d", src.File, src.Line)
 			sourceAttr := slog.String(slog.SourceKey, info)
