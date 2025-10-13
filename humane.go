@@ -6,15 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"runtime"
 	"slices"
 	"strconv"
 	"sync"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/telemachus/humane/internal/buffer"
-	"github.com/telemachus/humane/internal/grouppool"
+	"github.com/telemachus/humane/internal/pooled"
 )
 
 var (
@@ -100,20 +98,30 @@ func (h *handler) Enabled(_ context.Context, l slog.Level) bool {
 	return l >= h.level.Level()
 }
 
-// Handle formats a given record in a human-friendly but still largely
-// structured way.
+// Handle formats a record in a human-friendly but largely structured way.
+//
+// Typical lines will look like the following:
+//
+//	 INFO | Request processed | sku=24A2 branch=manhattan time="2023-04-02T10:50.09 EDT"
+//	ERROR | Connection failed | time=2024-01-23T17:14:03Z
+//
+// More abstractly each line has three sections that are separated by " | ".
+//
+//  1. A level: DEBUG, INFO, WARN, or ERROR.
+//  2. A message that the handler does not format in any way.
+//  3. Zero or more key=value pairs. By default, a time attribute appears at
+//     the end. The format of the time can be changed via Options.TimeFormat,
+//     and the time attribute can be removed using Options.ReplaceAttr.
 func (h *handler) Handle(_ context.Context, r slog.Record) error {
-	// Use slog's pooled buffer to minimize allocations.
-	buf := buffer.New()
+	buf := pooled.NewBuffer()
 	defer buf.Free()
-
-	// Use slog's grouppool to minimize allocations but only if ReplaceAttr is set.
-	var groups *[]string
+	// If ReplaceAttr is nil, groups can be nil.
+	var groups *pooled.StringSlice
 	hasReplaceAttr := h.replaceAttr != nil
 	if hasReplaceAttr {
-		groups = grouppool.New()
-		defer grouppool.Free(groups)
-		*groups = append(*groups, h.groups...)
+		groups = pooled.NewStringSlice()
+		defer groups.Free()
+		groups.Append(h.groups...)
 	}
 
 	appendLevel(buf, r.Level)
@@ -127,13 +135,18 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 		h.appendAttr(buf, a, h.groupPrefix, groups)
 		return true
 	})
-	if h.addSource && r.PC != 0 {
-		sourceAttr := newSourceAttr(r.PC)
-		h.appendAttr(buf, sourceAttr, h.groupPrefix, groups)
+	if h.addSource {
+		src := r.Source()
+		if src != nil && (src.File != "" || src.Line != 0) {
+			info := fmt.Sprintf("%s:%d", src.File, src.Line)
+			sourceAttr := slog.String(slog.SourceKey, info)
+			h.appendAttr(buf, sourceAttr, h.groupPrefix, groups)
+		}
 	}
 	timeAttr := slog.Time(slog.TimeKey, r.Time)
 	if hasReplaceAttr {
-		timeAttr = h.replaceAttr(nil, timeAttr) // Pass nil, not groups!
+		// Pass nil in order to format time without groups.
+		timeAttr = h.replaceAttr(nil, timeAttr)
 	}
 	if !r.Time.IsZero() && !timeAttr.Equal(slog.Attr{}) {
 		appendKey(buf, "", timeAttr.Key)
@@ -153,14 +166,14 @@ func (h *handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		return h
 	}
 	h2 := h.clone()
-	buf := buffer.New()
+	buf := pooled.NewBuffer()
 	defer buf.Free()
 
-	var groups *[]string
+	var groups *pooled.StringSlice
 	if h.replaceAttr != nil {
-		groups = grouppool.New()
-		defer grouppool.Free(groups)
-		*groups = append(*groups, h.groups...)
+		groups = pooled.NewStringSlice()
+		defer groups.Free()
+		groups.Append(h.groups...)
 	}
 
 	for _, a := range attrs {
@@ -177,8 +190,6 @@ func (h *handler) WithGroup(name string) slog.Handler {
 		return h
 	}
 	h2 := h.clone()
-	// Format group strings in advance for performance.
-	// See https://github.com/golang/example/blob/master/slog-handler-guide/README.md#with-pre-formatting.
 	if h.groupPrefix == "" {
 		h2.groupPrefix = name
 	} else {
@@ -194,6 +205,7 @@ func (h *handler) clone() *handler {
 		mu:          h.mu,
 		level:       h.level,
 		groupPrefix: h.groupPrefix,
+		// Force a new backing array as soon as h.groups grows.
 		groups:      slices.Clip(h.groups),
 		attrs:       h.attrs,
 		timeFormat:  h.timeFormat,
@@ -202,7 +214,7 @@ func (h *handler) clone() *handler {
 	}
 }
 
-func appendLevel(buf *buffer.Buffer, level slog.Level) {
+func appendLevel(buf *pooled.Buffer, level slog.Level) {
 	if lVal, ok := levelValues[level.Level()]; ok {
 		buf.WriteString(lVal)
 		return
@@ -213,7 +225,7 @@ func appendLevel(buf *buffer.Buffer, level slog.Level) {
 }
 
 //nolint:cyclop // This function simply *is* complex.
-func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groupPrefix string, groups *[]string) {
+func (h *handler) appendAttr(buf *pooled.Buffer, a slog.Attr, groupPrefix string, groups *pooled.StringSlice) {
 	a.Value = a.Value.Resolve()
 	if a.Value.Kind() == slog.KindGroup {
 		attrs := a.Value.Group()
@@ -229,7 +241,7 @@ func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groupPrefix string
 				newGroupPrefix = groupPrefix + "." + a.Key
 			}
 			if groups != nil {
-				*groups = append(*groups, a.Key)
+				groups.Append(a.Key)
 			}
 		} else {
 			newGroupPrefix = groupPrefix
@@ -240,7 +252,7 @@ func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groupPrefix string
 		}
 
 		if a.Key != "" && groups != nil {
-			*groups = (*groups)[:len(*groups)-1]
+			*groups = (*groups)[:groups.Len()-1]
 		}
 		return
 	}
@@ -258,7 +270,7 @@ func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr, groupPrefix string
 	}
 }
 
-func appendKey(buf *buffer.Buffer, groups, key string) {
+func appendKey(buf *pooled.Buffer, groups, key string) {
 	buf.WriteByte(' ')
 	var fullKey string
 	if groups != "" {
@@ -275,7 +287,7 @@ func appendKey(buf *buffer.Buffer, groups, key string) {
 }
 
 //nolint:cyclop // This function simply *is* complex.
-func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
+func (h *handler) appendVal(buf *pooled.Buffer, val slog.Value) {
 	switch val.Kind() {
 	case slog.KindString:
 		appendString(buf, val.String())
@@ -317,24 +329,12 @@ func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
 	}
 }
 
-func appendString(buf *buffer.Buffer, s string) {
+func appendString(buf *pooled.Buffer, s string) {
 	if needsQuoting(s) {
 		*buf = strconv.AppendQuote(*buf, s)
 	} else {
 		buf.WriteString(s)
 	}
-}
-
-func newSourceAttr(pc uintptr) slog.Attr {
-	source := frame(pc)
-	info := fmt.Sprintf("%s:%d", source.File, source.Line)
-	return slog.String(slog.SourceKey, info)
-}
-
-func frame(pc uintptr) runtime.Frame {
-	fs := runtime.CallersFrames([]uintptr{pc})
-	f, _ := fs.Next()
-	return f
 }
 
 func needsQuoting(s string) bool {

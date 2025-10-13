@@ -28,8 +28,8 @@ linters-settings:
       - fmt.Fprintf
       - fmt.Fprintln
       - strings.Builder.WriteString
-      - (*github.com/telemachus/humane/internal/buffer.Buffer).WriteByte
-      - (*github.com/telemachus/humane/internal/buffer.Buffer).WriteString
+      - (*github.com/telemachus/humane/internal/pooled.Buffer).WriteByte
+      - (*github.com/telemachus/humane/internal/pooled.Buffer).WriteString
   exhaustive:
     default-signifies-exhaustive: true
   goconst:

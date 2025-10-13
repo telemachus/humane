@@ -71,11 +71,11 @@ func TestHumaneCustomLevel(t *testing.T) {
 	var buf bytes.Buffer
 	opts := &humane.Options{ReplaceAttr: removeTime, Level: slog.LevelError}
 	logger := slog.New(humane.NewHandler(&buf, opts))
-	logger.Info("wtf?")
+	logger.Info("Testing 1, 2, 3")
 	got := buf.String()
 	want := ""
 	if got != want {
-		t.Errorf(`logger.Info("wtf?") = %q; want %q`, got, want)
+		t.Errorf(`logger.Info("Testing 1, 2, 3") = %q; want %q`, got, want)
 	}
 }
 
