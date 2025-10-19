@@ -145,7 +145,7 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	}
 	timeAttr := slog.Time(slog.TimeKey, r.Time)
 	if hasReplaceAttr {
-		// Pass nil in order to format time without groups.
+		// Pass nil since we format time outside of groups.
 		timeAttr = h.replaceAttr(nil, timeAttr)
 	}
 	if !r.Time.IsZero() && !timeAttr.Equal(slog.Attr{}) {
