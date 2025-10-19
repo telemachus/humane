@@ -107,7 +107,7 @@ func TestHumaneCustomTimeFormat(t *testing.T) {
 		time.Now().Format(timeFormat),
 	)
 	if got != want {
-		t.Errorf(`logger.Info("foo") (+ TimeFormat) = %q; want %q`, got, want)
+		t.Errorf(`logger.Info("foo") (TimeFormat %q) = %q; want %q`, timeFormat, got, want)
 	}
 }
 
@@ -130,7 +130,7 @@ func TestHumaneSlogGroup(t *testing.T) {
 	got := buf.String()
 	want := " INFO | message | foo.c=3 foo.bar.d=4 c=3\n"
 	if got != want {
-		t.Errorf(`logger.Info("message") (+ Groups) = %q; want %q`, got, want)
+		t.Errorf(`logger.Info("message") (Groups) = %q; want %q`, got, want)
 	}
 }
 
@@ -154,7 +154,7 @@ func TestHumaneWithGroup(t *testing.T) {
 	want := " INFO | message | GROUP.foo.c=3 GROUP.foo.bar.d=4 GROUP.c=3\n"
 	if got != want {
 		t.Errorf(
-			`logger.Info("message") (+ WithGroup and Groups) = %q; want %q`,
+			`logger.Info("message") (WithGroup and Groups) = %q; want %q`,
 			got,
 			want,
 		)
@@ -181,7 +181,7 @@ func TestHumaneWithAttrs(t *testing.T) {
 	got := buf.String()
 	want := " INFO | message | c=3 foo=bar foo.c=3 foo.bar.d=4 c=3\n"
 	if got != want {
-		t.Errorf(`logger.Info("message") (+WithAttrs) = %q; want %q`, got, want)
+		t.Errorf(`logger.Info("message") (WithAttrs) = %q; want %q`, got, want)
 	}
 }
 
@@ -195,43 +195,11 @@ func TestHumaneWithGroupWithAttrs(t *testing.T) {
 	got := buf.String()
 	want := " INFO | message | g.a=1 g.h.b=2\n"
 	if got != want {
-		t.Errorf(`logger.Info("message") (+WithGroup + WithAttrs) = %q; want %q`, got, want)
+		t.Errorf(`logger.Info("message") (WithGroup and WithAttrs) = %q; want %q`, got, want)
 	}
 }
 
-func TestReplaceAttrGroupsInWithAttrs(t *testing.T) {
-	t.Parallel()
-	var buf bytes.Buffer
-
-	var receivedGroups [][]string
-	replaceAttr := func(groups []string, a slog.Attr) slog.Attr {
-		if a.Key == slog.TimeKey {
-			return slog.Attr{}
-		}
-		// Record what groups we received for each attr
-		receivedGroups = append(receivedGroups, append([]string(nil), groups...))
-		return a
-	}
-
-	opts := &humane.Options{ReplaceAttr: replaceAttr}
-	logger := slog.New(humane.NewHandler(&buf, opts))
-
-	// Create a logger with groups, then add attrs using With()
-	logger.WithGroup("g1").WithGroup("g2").With("a", "1", "b", "2")
-
-	// ReplaceAttr should have been called twice (for "a" and "b")
-	// and both times should see groups = ["g1", "g2"]
-	want := [][]string{
-		{"g1", "g2"},
-		{"g1", "g2"},
-	}
-
-	if diff := cmp.Diff(want, receivedGroups); diff != "" {
-		t.Errorf("ReplaceAttr groups mismatch (-want +got):\n%s", diff)
-	}
-}
-
-func TestHumaneNeedsQuoting(t *testing.T) {
+func TestQuotingForAttrs(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {
 		name string
@@ -291,156 +259,7 @@ func TestHumaneNeedsQuoting(t *testing.T) {
 	}
 }
 
-func TestHumaneConcurrentGroupHandling(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-	opts := &humane.Options{ReplaceAttr: removeTime}
-	handler := humane.NewHandler(&buf, opts)
-
-	// Test that concurrent logging with nested groups works safely.
-	records := []slog.Record{
-		func() slog.Record {
-			r := slog.NewRecord(time.Now(), slog.LevelInfo, "msg1", 0)
-			r.AddAttrs(slog.Group("req",
-				slog.Group("db", slog.String("query", "SELECT")),
-				slog.String("id", "123")))
-			return r
-		}(),
-		func() slog.Record {
-			r := slog.NewRecord(time.Now(), slog.LevelWarn, "msg2", 0)
-			r.AddAttrs(slog.Group("auth",
-				slog.String("user", "alice"),
-				slog.Group("perms", slog.Bool("admin", false))))
-			return r
-		}(),
-	}
-
-	const numGoroutines = 100
-	const recordsPerGoroutine = 10
-	var wg sync.WaitGroup
-
-	// This channel will synchronize start of goroutines for maximum race potential.
-	start := make(chan struct{})
-
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-
-			for j := 0; j < recordsPerGoroutine; j++ {
-				record := records[j%len(records)]
-				err := handler.Handle(context.Background(), record)
-				if err != nil {
-					t.Errorf("Handle failed: %v", err)
-				}
-			}
-		}()
-	}
-
-	close(start)
-	wg.Wait()
-
-	output := buf.String()
-	if !strings.Contains(output, "req.db.query=") {
-		t.Error("Expected nested group output not found")
-	}
-	if !strings.Contains(output, "auth.perms.admin=") {
-		t.Error("Expected nested group output not found")
-	}
-}
-
-func TestAnonymousInlineGroup(t *testing.T) {
-	t.Parallel()
-	var buf bytes.Buffer
-	opts := &humane.Options{ReplaceAttr: removeTime}
-	logger := slog.New(humane.NewHandler(&buf, opts))
-
-	// Anonymous group should not add a nesting level - attrs should appear at current level
-	logger.Info("message",
-		slog.Group("outer",
-			slog.String("a", "1"),
-			slog.Group("", // anonymous group
-				slog.String("b", "2"),
-				slog.String("c", "3"),
-			),
-			slog.String("d", "4"),
-		),
-	)
-
-	got := buf.String()
-	want := " INFO | message | outer.a=1 outer.b=2 outer.c=3 outer.d=4\n"
-	if got != want {
-		t.Errorf("logger.Info with anonymous inline group = %q; want %q", got, want)
-	}
-}
-
-func TestEmptyInlineGroup(t *testing.T) {
-	t.Parallel()
-	var buf bytes.Buffer
-	opts := &humane.Options{ReplaceAttr: removeTime}
-	logger := slog.New(humane.NewHandler(&buf, opts))
-
-	// Empty groups should produce no output
-	logger.Info("message",
-		slog.String("before", "1"),
-		slog.Group("empty"), // no attributes
-		slog.String("after", "2"),
-	)
-
-	got := buf.String()
-	want := " INFO | message | before=1 after=2\n"
-	if got != want {
-		t.Errorf("logger.Info with empty inline group = %q; want %q", got, want)
-	}
-}
-
-func TestReplaceAttrGroupsSlice(t *testing.T) {
-	t.Parallel()
-	var buf bytes.Buffer
-
-	// Track what groups slice ReplaceAttr receives for each attribute
-	type attrContext struct {
-		Key    string
-		Groups []string
-	}
-	var got []attrContext
-
-	replaceAttr := func(groups []string, a slog.Attr) slog.Attr {
-		if a.Key == slog.TimeKey {
-			return slog.Attr{}
-		}
-		// Record the groups slice for this attribute
-		got = append(got, attrContext{
-			Key:    a.Key,
-			Groups: append([]string(nil), groups...), // copy to avoid slice reuse issues
-		})
-		return a
-	}
-
-	opts := &humane.Options{ReplaceAttr: replaceAttr}
-	logger := slog.New(humane.NewHandler(&buf, opts))
-
-	logger.WithGroup("g1").WithGroup("g2").Info("message",
-		slog.String("a", "1"),
-		slog.Group("g3",
-			slog.String("b", "2"),
-		),
-	)
-
-	// Verify groups slice for each attribute
-	want := []attrContext{
-		{Key: "a", Groups: []string{"g1", "g2"}},
-		{Key: "b", Groups: []string{"g1", "g2", "g3"}},
-	}
-
-	if diff := cmp.Diff(want, got); diff != "" {
-		t.Errorf("unexpected contexts (-want +got):\n%s", diff)
-	}
-}
-
-func TestGroupNamesThatRequireQuoting(t *testing.T) {
+func TestQuotingForGroupNames(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {
 		name      string
@@ -478,5 +297,180 @@ func TestGroupNamesThatRequireQuoting(t *testing.T) {
 				t.Errorf("group name %q: got %q; want %q", tc.groupName, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestHumaneConcurrentGroupHandling(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	opts := &humane.Options{ReplaceAttr: removeTime}
+	handler := humane.NewHandler(&buf, opts)
+
+	records := []slog.Record{
+		func() slog.Record {
+			r := slog.NewRecord(time.Now(), slog.LevelInfo, "msg1", 0)
+			r.AddAttrs(slog.Group("req",
+				slog.Group("db", slog.String("query", "SELECT")),
+				slog.String("id", "123")))
+			return r
+		}(),
+		func() slog.Record {
+			r := slog.NewRecord(time.Now(), slog.LevelWarn, "msg2", 0)
+			r.AddAttrs(slog.Group("auth",
+				slog.String("user", "alice"),
+				slog.Group("perms", slog.Bool("admin", false))))
+			return r
+		}(),
+	}
+
+	const numGoroutines = 100
+	const recordsPerGoroutine = 10
+	var wg sync.WaitGroup
+
+	// Synchronize start of goroutines for maximum race potential.
+	start := make(chan struct{})
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+
+			for j := 0; j < recordsPerGoroutine; j++ {
+				record := records[j%len(records)]
+				err := handler.Handle(context.Background(), record)
+				if err != nil {
+					t.Errorf("Handle failed: %v", err)
+				}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+
+	output := buf.String()
+	if !strings.Contains(output, "req.db.query=") {
+		t.Error("Expected nested group output not found")
+	}
+	if !strings.Contains(output, "auth.perms.admin=") {
+		t.Error("Expected nested group output not found")
+	}
+}
+
+func TestUnnamedInlineGroup(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	opts := &humane.Options{ReplaceAttr: removeTime}
+	logger := slog.New(humane.NewHandler(&buf, opts))
+
+	// Place attrs for unnamed groups on parent level.
+	logger.Info("message",
+		slog.Group("outer",
+			slog.String("a", "1"),
+			slog.Group("",
+				slog.String("b", "2"),
+				slog.String("c", "3"),
+			),
+			slog.String("d", "4"),
+		),
+	)
+
+	got := buf.String()
+	want := " INFO | message | outer.a=1 outer.b=2 outer.c=3 outer.d=4\n"
+	if got != want {
+		t.Errorf("logger.Info with unnamed group = %q; want %q", got, want)
+	}
+}
+
+func TestNoAttrsGroup(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	opts := &humane.Options{ReplaceAttr: removeTime}
+	logger := slog.New(humane.NewHandler(&buf, opts))
+
+	// Ignore groups without attrs (even if they have a name).
+	logger.Info("message",
+		slog.String("before", "1"),
+		slog.Group("empty"),
+		slog.String("after", "2"),
+	)
+
+	got := buf.String()
+	want := " INFO | message | before=1 after=2\n"
+	if got != want {
+		t.Errorf("logger.Info with empty inline group = %q; want %q", got, want)
+	}
+}
+
+func TestReplaceAttrGroupsInWithAttrs(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+
+	var receivedGroups [][]string
+	replaceAttr := func(groups []string, a slog.Attr) slog.Attr {
+		if a.Key == slog.TimeKey {
+			return slog.Attr{}
+		}
+		receivedGroups = append(receivedGroups, append([]string(nil), groups...))
+		return a
+	}
+
+	opts := &humane.Options{ReplaceAttr: replaceAttr}
+	logger := slog.New(humane.NewHandler(&buf, opts))
+	logger.WithGroup("g1").WithGroup("g2").With("a", "1", "b", "2")
+
+	// ReplaceAttr should have be called twice (for "a" and "b"),
+	// and both calls should receive groups = ["g1", "g2"].
+	want := [][]string{
+		{"g1", "g2"},
+		{"g1", "g2"},
+	}
+
+	if diff := cmp.Diff(want, receivedGroups); diff != "" {
+		t.Errorf("ReplaceAttr groups mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestReplaceAttrGroupsSlice(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+
+	type attrContext struct {
+		Key    string
+		Groups []string
+	}
+	var got []attrContext
+
+	replaceAttr := func(groups []string, a slog.Attr) slog.Attr {
+		if a.Key == slog.TimeKey {
+			return slog.Attr{}
+		}
+		got = append(got, attrContext{
+			// Avoid slice reuse.
+			Groups: append([]string(nil), groups...),
+			Key:    a.Key,
+		})
+		return a
+	}
+
+	opts := &humane.Options{ReplaceAttr: replaceAttr}
+	logger := slog.New(humane.NewHandler(&buf, opts))
+
+	logger.WithGroup("g1").WithGroup("g2").Info("message",
+		slog.String("a", "1"),
+		slog.Group("g3",
+			slog.String("b", "2"),
+		),
+	)
+
+	want := []attrContext{
+		{Key: "a", Groups: []string{"g1", "g2"}},
+		{Key: "b", Groups: []string{"g1", "g2", "g3"}},
+	}
+
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("ReplaceAttr contexts mismatch (-want +got):\n%s", diff)
 	}
 }

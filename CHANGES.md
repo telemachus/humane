@@ -1,17 +1,17 @@
 # humane version history
 
-# v0.6.0
+## v0.6.0
 
 + Fix a bug (found thanks to a user): display the level of the record not the
   handler (!).
 
-# v0.5.0
+## v0.5.0
 
 + Switch from `exp/slog` to `log/slog` and from `exp/slices` to `slices` now
   that Go 1.21 has been released.
 + Adjust the `NewHandler` function to match the latest `slog` API.
 + Use a pointer to `sync.Mutex` rather than `sync.Mutex`. See this discussion
-  in the guide to writing `slog` handlers for why: https://bit.ly/3s2KrOG.
+  in the guide to writing `slog` handlers for why: <https://bit.ly/3s2KrOG>.
 + Add `testing/slogtest`.
 + Fix a bug (found thanks to `testing/slogtest`): move the test for
   `Attr.Empty` to catch all empty attrs.
