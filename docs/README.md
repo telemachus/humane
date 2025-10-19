@@ -24,10 +24,12 @@ ERROR | Connection failed | time=2024-01-23T17:14:03Z
 More abstractly each line has three sections that are separated by " | ".
 
 1. A level: DEBUG, INFO, WARN, or ERROR.
-2. A message.
+2. A message that the handler does not format in any way.
 3. Zero or more key=value pairs. By default, a time attribute appears at the
-   end. The format of the time can be changed via Options.TimeFormat, and the
-   time attribute can be removed using Options.ReplaceAttr.
+   end. The format of the time can be changed via Options.`TimeFormat`, and the
+   time attribute can be removed using `Options.ReplaceAttr`. Both time and
+   source (if `AddSource` is true) appear at the top level and are not affected
+   by `WithGroup()`.
 
 The level and message sections appear as is without `key=value` structure or
 quoting. Then the rest of the attributes appear as `key=value` pairs. A time
@@ -82,8 +84,9 @@ logger.Info("This message will not be written because the level is too low.")
   function is applied to each Attr in a given Record during handling. This
   allows you to, e.g., edit Attrs or omit them altogether. See [slog's
   documentation and tests for further examples](https://pkg.go.dev/log/slog).
-  Note that the ReplaceAttr function is **not** applied to the level or message
-  since they receive no formatting by this handler.
+  Note that the ReplaceAttr function is **not** applied to the level or message,
+  but it **is** applied to time and source attributes. (These two attributes
+  always appear at the top level; thus, they receive an empty groups slice.)
 
   In order to make the time and source Attrs easier to test, they use constants
   defined by slog for their keys: `slog.TimeKey` and `slog.SourceKey`.

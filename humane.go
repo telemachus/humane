@@ -111,7 +111,9 @@ func (h *handler) Enabled(_ context.Context, l slog.Level) bool {
 //  2. A message that the handler does not format in any way.
 //  3. Zero or more key=value pairs. By default, a time attribute appears at
 //     the end. The format of the time can be changed via Options.TimeFormat,
-//     and the time attribute can be removed using Options.ReplaceAttr.
+//     and the time attribute can be removed using Options.ReplaceAttr. Both
+//     time and source (if AddSource is true) appear at the top level and are
+//     not affected by WithGroup().
 func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	buf := pooled.NewBuffer()
 	defer buf.Free()
@@ -138,9 +140,13 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	if h.addSource {
 		src := source(r)
 		if src != nil && (src.File != "" || src.Line != 0) {
-			info := fmt.Sprintf("%s:%d", src.File, src.Line)
-			sourceAttr := slog.String(slog.SourceKey, info)
-			h.appendAttr(buf, sourceAttr, h.groupPrefix, groups)
+			sourceBuf := pooled.NewBuffer()
+			defer sourceBuf.Free()
+			sourceBuf.WriteString(src.File)
+			sourceBuf.WriteByte(':')
+			sourceBuf.WriteString(strconv.Itoa(src.Line))
+			sourceAttr := slog.String(slog.SourceKey, sourceBuf.String())
+			h.appendAttr(buf, sourceAttr, "", nil)
 		}
 	}
 	timeAttr := slog.Time(slog.TimeKey, r.Time)

@@ -47,4 +47,7 @@ bench-compare:
 clean:
 	go clean -i -r -cache
 
-.PHONY: fmt staticcheck revive golangci lint build install test testv bench-quick bench bench-baseline bench-compare
+.PHONY: fmt staticcheck revive golangci lint
+.PHONY: test testv testr
+.PHONY: bench-quick bench bench-baseline bench-compare
+.PHONY: build install clean

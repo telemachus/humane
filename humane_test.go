@@ -474,3 +474,36 @@ func TestReplaceAttrGroupsSlice(t *testing.T) {
 		t.Errorf("ReplaceAttr contexts mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestAddSourceWithGroup(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	opts := &humane.Options{ReplaceAttr: removeTime, AddSource: true}
+	logger := slog.New(humane.NewHandler(&buf, opts)).WithGroup("g1").WithGroup("g2")
+	logger.Info("message", "key", "value")
+	got := buf.String()
+	if !strings.Contains(got, " source=") || strings.Contains(got, "g1.g2.source=") {
+		t.Errorf("got %q; source attribute should be top-level", got)
+	}
+}
+
+func TestReplaceAttrGroupsForSource(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	var sourceGroups []string
+	replaceAttr := func(groups []string, a slog.Attr) slog.Attr {
+		if a.Key == slog.SourceKey {
+			sourceGroups = append([]string(nil), groups...)
+		}
+		if a.Key == slog.TimeKey {
+			return slog.Attr{}
+		}
+		return a
+	}
+	opts := &humane.Options{ReplaceAttr: replaceAttr, AddSource: true}
+	logger := slog.New(humane.NewHandler(&buf, opts)).WithGroup("g1")
+	logger.Info("message")
+	if len(sourceGroups) != 0 {
+		t.Errorf("got %v; ReplaceAttr for source should receive nil for groups", sourceGroups)
+	}
+}
