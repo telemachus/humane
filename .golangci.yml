@@ -1,4 +1,10 @@
 linters-settings:
+  cyclop:
+    max-complexity: 10
+    package-average: 0.0
+    skip-tests: false
+  copyloopvar:
+    check-alias: true
   depguard:
       rules:
         main:
@@ -21,8 +27,9 @@ linters-settings:
       - fmt.Println
       - fmt.Fprintf
       - fmt.Fprintln
-      - (*github.com/telemachus/humane/internal/buffer.Buffer).WriteByte
-      - (*github.com/telemachus/humane/internal/buffer.Buffer).WriteString
+      - strings.Builder.WriteString
+      - (*github.com/telemachus/humane/internal/pooled.Buffer).WriteByte
+      - (*github.com/telemachus/humane/internal/pooled.Buffer).WriteString
   exhaustive:
     default-signifies-exhaustive: true
   goconst:
@@ -50,9 +57,9 @@ linters:
   enable:
     - bodyclose
     - copyloopvar
+    - cyclop
     - depguard
     - dogsled
-    - dupl
     - errcheck
     - errchkjson
     - errname
@@ -64,25 +71,25 @@ linters:
     - gosimple
     - govet
     - ineffassign
+    - ireturn
+    - maintidx
     - misspell
     - nolintlint
     - nakedret
-    - paralleltest
     - prealloc
     - predeclared
-    - staticcheck
     - stylecheck
     - thelper
-    - tparallel
     - typecheck
     - unconvert
     - unparam
     - unused
     - whitespace
 
-run:
-  issues-exit-code: 1
 
-issues:
-  exclude-dirs:
-    - internal
+run:
+  concurrency: 8
+  issues-exit-code: 1
+  timeout: 3m
+  tests: true
+  allow-parallel-runners: false

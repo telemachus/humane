@@ -6,15 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"runtime"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/telemachus/humane/internal/buffer"
+	"github.com/telemachus/humane/internal/pooled"
 )
 
 var (
@@ -34,6 +32,7 @@ type handler struct {
 	mu          *sync.Mutex
 	replaceAttr func(groups []string, a slog.Attr) slog.Attr
 	attrs       string
+	groupPrefix string
 	timeFormat  string
 	groups      []string
 	addSource   bool
@@ -41,24 +40,26 @@ type handler struct {
 
 // Options are options for Humane's [log/slog.Handler].
 //
-// Level reports the minimum level to log. Humane uses [log/slog.LevelInfo] as
-// its default level. In order to set a different level, use one of the
-// built-in choices for [log/slog.Level] or implement a [log/slog.Leveler].
+// Level sets the minimum level to log. Humane uses [log/slog.LevelInfo] as its
+// default. In order to set a different level, use one of the built-in choices
+// for [log/slog.Level] or implement a [log/slog.Leveler].
 //
 // ReplaceAttr is a user-defined function that receives each non-group Attr
-// before it is logged. By default, ReplaceAttr is nil, and no changes are made
-// to Attrs. Note: Humane's handler does not apply ReplaceAttr to the level or
-// message Attrs because the handler already formats these items in a specific
-// way. However, Humane does apply ReplaceAttr to the time Attr (unless it's
-// zero) and to the source Attr if AddSource is true.
+// before it is logged. The first argument is a slice of groups that contain
+// the Attr. This slice is read-only; do not retain or modify it. By default,
+// ReplaceAttr is nil, and no changes are made to Attrs. Note: Humane's handler
+// does not apply ReplaceAttr to the level or message Attrs because the handler
+// already formats these items in a specific way. However, Humane does apply
+// ReplaceAttr to the time Attr (unless it's zero) and to the source Attr if
+// AddSource is true.
 //
 // TimeFormat defaults to "2006-01-02T03:04.05 MST". Set a format option to
 // customize the presentation of the time. (See [time.Time.Format] for details
 // about the format string.)
 //
 // AddSource defaults to false. If AddSource is true, the handler adds to each
-// log event an Attr with [log/slog.SourceKey] as the key and "file:line" as
-// the value.
+// log event an Attr with a key of [log/slog.SourceKey] and a value of
+// "/path/to/file:line".
 type Options struct {
 	Level       slog.Leveler
 	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
@@ -79,8 +80,8 @@ func NewHandler(w io.Writer, opts *Options) slog.Handler {
 		timeFormat:  opts.TimeFormat,
 		replaceAttr: opts.ReplaceAttr,
 		addSource:   opts.AddSource,
+		groups:      make([]string, 0, 10),
 	}
-	h.groups = make([]string, 0, 10)
 	if opts.Level == nil {
 		h.level = defaultLevel
 	}
@@ -99,12 +100,35 @@ func (h *handler) Enabled(_ context.Context, l slog.Level) bool {
 	return l >= h.level.Level()
 }
 
-// Handle formats a given record in a human-friendly but still largely
-// structured way.
+// Handle formats a record in a human-friendly but largely structured way.
+//
+// Typical lines will look like the following:
+//
+//	 INFO | Request processed | sku=24A2 branch=manhattan time="2023-04-02T10:50.09 EDT"
+//	ERROR | Connection failed | time=2024-01-23T17:14:03Z
+//
+// More abstractly each line has three sections that are separated by " | ".
+//
+//  1. A level: DEBUG, INFO, WARN, or ERROR.
+//  2. A message that the handler does not format in any way.
+//  3. Zero or more key=value pairs. By default, a time attribute appears at
+//     the end. The format of the time can be changed via Options.TimeFormat,
+//     and the time attribute can be removed using Options.ReplaceAttr. Both
+//     time and source (if AddSource is true) appear at the top level and are
+//     not affected by WithGroup().
 func (h *handler) Handle(_ context.Context, r slog.Record) error {
-	buf := buffer.New()
+	buf := pooled.NewBuffer()
 	defer buf.Free()
-	h.appendLevel(buf, r.Level)
+	// If ReplaceAttr is nil, groups can be nil.
+	var groups *pooled.StringSlice
+	hasReplaceAttr := h.replaceAttr != nil
+	if hasReplaceAttr {
+		groups = pooled.NewStringSlice()
+		defer groups.Free()
+		groups.Append(h.groups...)
+	}
+
+	appendLevel(buf, r.Level)
 	buf.WriteByte(' ')
 	buf.WriteString(r.Message)
 	buf.WriteString(" |")
@@ -112,19 +136,28 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 		buf.WriteString(h.attrs)
 	}
 	r.Attrs(func(a slog.Attr) bool {
-		h.appendAttr(buf, a)
+		h.appendAttr(buf, a, h.groupPrefix, groups)
 		return true
 	})
-	if h.addSource && r.PC != 0 {
-		sourceAttr := h.newSourceAttr(r.PC)
-		h.appendAttr(buf, sourceAttr)
+	if h.addSource {
+		src := source(r)
+		if src != nil && (src.File != "" || src.Line != 0) {
+			sourceBuf := pooled.NewBuffer()
+			defer sourceBuf.Free()
+			sourceBuf.WriteString(src.File)
+			sourceBuf.WriteByte(':')
+			sourceBuf.WriteString(strconv.Itoa(src.Line))
+			sourceAttr := slog.String(slog.SourceKey, sourceBuf.String())
+			h.appendAttr(buf, sourceAttr, "", nil)
+		}
 	}
 	timeAttr := slog.Time(slog.TimeKey, r.Time)
-	if h.replaceAttr != nil {
+	if hasReplaceAttr {
+		// Pass nil since we format time outside of groups.
 		timeAttr = h.replaceAttr(nil, timeAttr)
 	}
 	if !r.Time.IsZero() && !timeAttr.Equal(slog.Attr{}) {
-		appendKey(buf, nil, timeAttr.Key)
+		appendKey(buf, "", timeAttr.Key)
 		h.appendVal(buf, timeAttr.Value)
 	}
 	buf.WriteByte('\n')
@@ -141,10 +174,18 @@ func (h *handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		return h
 	}
 	h2 := h.clone()
-	buf := buffer.New()
+	buf := pooled.NewBuffer()
 	defer buf.Free()
+
+	var groups *pooled.StringSlice
+	if h.replaceAttr != nil {
+		groups = pooled.NewStringSlice()
+		defer groups.Free()
+		groups.Append(h.groups...)
+	}
+
 	for _, a := range attrs {
-		h2.appendAttr(buf, a)
+		h2.appendAttr(buf, a, h.groupPrefix, groups)
 	}
 	h2.attrs += string(*buf)
 	return h2
@@ -157,6 +198,11 @@ func (h *handler) WithGroup(name string) slog.Handler {
 		return h
 	}
 	h2 := h.clone()
+	if h.groupPrefix == "" {
+		h2.groupPrefix = name
+	} else {
+		h2.groupPrefix = h.groupPrefix + "." + name
+	}
 	h2.groups = append(h2.groups, name)
 	return h2
 }
@@ -166,6 +212,8 @@ func (h *handler) clone() *handler {
 		w:           h.w,
 		mu:          h.mu,
 		level:       h.level,
+		groupPrefix: h.groupPrefix,
+		// Force a new backing array as soon as h.groups grows.
 		groups:      slices.Clip(h.groups),
 		attrs:       h.attrs,
 		timeFormat:  h.timeFormat,
@@ -174,7 +222,7 @@ func (h *handler) clone() *handler {
 	}
 }
 
-func (h *handler) appendLevel(buf *buffer.Buffer, level slog.Level) {
+func appendLevel(buf *pooled.Buffer, level slog.Level) {
 	if lVal, ok := levelValues[level.Level()]; ok {
 		buf.WriteString(lVal)
 		return
@@ -184,47 +232,70 @@ func (h *handler) appendLevel(buf *buffer.Buffer, level slog.Level) {
 	buf.WriteString(" |")
 }
 
-func (h *handler) appendAttr(buf *buffer.Buffer, a slog.Attr) {
+//nolint:cyclop // This function simply *is* complex.
+func (h *handler) appendAttr(buf *pooled.Buffer, a slog.Attr, groupPrefix string, groups *pooled.StringSlice) {
 	a.Value = a.Value.Resolve()
 	if a.Value.Kind() == slog.KindGroup {
 		attrs := a.Value.Group()
 		if len(attrs) == 0 {
 			return
 		}
+		var newGroupPrefix string
+
 		if a.Key != "" {
-			h.groups = append(h.groups, a.Key)
+			if groupPrefix == "" {
+				newGroupPrefix = a.Key
+			} else {
+				newGroupPrefix = groupPrefix + "." + a.Key
+			}
+			if groups != nil {
+				groups.Append(a.Key)
+			}
+		} else {
+			newGroupPrefix = groupPrefix
 		}
+
 		for _, a := range attrs {
-			h.appendAttr(buf, a)
+			h.appendAttr(buf, a, newGroupPrefix, groups)
 		}
-		if a.Key != "" {
-			h.groups = h.groups[:len(h.groups)-1]
+
+		if a.Key != "" && groups != nil {
+			*groups = (*groups)[:groups.Len()-1]
 		}
 		return
 	}
+
+	var groupsSlice []string
+	if groups != nil {
+		groupsSlice = *groups
+	}
 	if h.replaceAttr != nil {
-		a = h.replaceAttr(h.groups, a)
+		a = h.replaceAttr(groupsSlice, a)
 	}
 	if !a.Equal(slog.Attr{}) {
-		appendKey(buf, h.groups, a.Key)
+		appendKey(buf, groupPrefix, a.Key)
 		h.appendVal(buf, a.Value)
 	}
 }
 
-func appendKey(buf *buffer.Buffer, groups []string, key string) {
+func appendKey(buf *pooled.Buffer, groups, key string) {
 	buf.WriteByte(' ')
-	if len(groups) > 0 {
-		key = strings.Join(groups, ".") + "." + key
-	}
-	if needsQuoting(key) {
-		*buf = strconv.AppendQuote(*buf, key)
+	var fullKey string
+	if groups != "" {
+		fullKey = groups + "." + key
 	} else {
-		buf.WriteString(key)
+		fullKey = key
+	}
+	if needsQuoting(fullKey) {
+		*buf = strconv.AppendQuote(*buf, fullKey)
+	} else {
+		buf.WriteString(fullKey)
 	}
 	buf.WriteByte('=')
 }
 
-func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
+//nolint:cyclop // This function simply *is* complex.
+func (h *handler) appendVal(buf *pooled.Buffer, val slog.Value) {
 	switch val.Kind() {
 	case slog.KindString:
 		appendString(buf, val.String())
@@ -239,9 +310,10 @@ func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
 	case slog.KindDuration:
 		appendString(buf, val.Duration().String())
 	case slog.KindTime:
-		// If fmt contains any quote characters, this won't
-		// properly quote it. But alternative versions run far slower.
-		// If the user must have a time with quotes, they can use
+		// This is crude: if timeFormat needs quoting, we simply quote
+		// the entire formatted time string.
+		//
+		// If the user must have a time with quotes, they should use
 		// ReplaceAttr to change the Kind to slog.String.
 		quoteTime := needsQuoting(h.timeFormat)
 		if quoteTime {
@@ -255,7 +327,7 @@ func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
 		if tm, ok := val.Any().(encoding.TextMarshaler); ok {
 			data, err := tm.MarshalText()
 			if err != nil {
-				// TODO: should this append an error?
+				appendString(buf, fmt.Sprintf("!ERROR:%v", err))
 				return
 			}
 			appendString(buf, string(data))
@@ -265,7 +337,7 @@ func (h *handler) appendVal(buf *buffer.Buffer, val slog.Value) {
 	}
 }
 
-func appendString(buf *buffer.Buffer, s string) {
+func appendString(buf *pooled.Buffer, s string) {
 	if needsQuoting(s) {
 		*buf = strconv.AppendQuote(*buf, s)
 	} else {
@@ -273,21 +345,10 @@ func appendString(buf *buffer.Buffer, s string) {
 	}
 }
 
-func (h *handler) newSourceAttr(pc uintptr) slog.Attr {
-	source := frame(pc)
-	info := fmt.Sprintf("%s:%d", source.File, source.Line)
-	return slog.String(slog.SourceKey, info)
-}
-
-func frame(pc uintptr) runtime.Frame {
-	fs := runtime.CallersFrames([]uintptr{pc})
-	f, _ := fs.Next()
-	return f
-}
-
 func needsQuoting(s string) bool {
 	for i := 0; i < len(s); {
 		b := s[i]
+		// Handle ASCII characters quickly.
 		if b < utf8.RuneSelf {
 			if unsafe[b] {
 				return true

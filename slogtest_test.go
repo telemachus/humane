@@ -13,7 +13,7 @@ import (
 )
 
 // This code is (very lightly) adapted from examples in slog and slogtest.
-// Thanks to Jonathan Amsterdam for both.
+// Credit goes to Jonathan Amsterdam for both.
 func TestSlogtest(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
@@ -49,7 +49,7 @@ func parseHumane(bs []byte) (map[string]any, error) {
 	// The rest of the line contains kv pairs that we can (roughly) divide
 	// by spaces. This is crude since it will split a quoted key or value
 	// that contains a space. For this test, however, this will work---as
-	// long as I make sure to set a time format without whitespace.
+	// long as we set a time format without whitespace.
 	s = pieces[2]
 	for s != "" {
 		kv, rest, _ := strings.Cut(s, " ")

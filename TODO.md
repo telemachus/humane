@@ -1,6 +1,12 @@
 # TODO list
 
-+ Try preformatting of groups and attributes, as discussed [here][howto].
-+ Simplify appendAttr.
+## Internal
 
-[howto]: https://github.com/golang/example/blob/master/slog-handler-guide/README.md#with-pre-formatting
++ Update TestHumaneConcurrentGroupHandling to use sync.WaitGroup.Go when 1.26 is
+  released.
++ Simplify appendAttr?
+
+## log/slog updates to investigate
+
++ Level implements `encoding.TextAppender`. Can this help humane's level
+  formatting?
