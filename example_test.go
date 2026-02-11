@@ -1,7 +1,7 @@
 package humane_test
 
 import (
-	"fmt"
+	"errors"
 	"log/slog"
 	"os"
 
@@ -15,7 +15,7 @@ func ExampleInfo() {
 	logger.Info("Bar")
 	logger.Warn("Fizz")
 	logger.Error("Buzz")
-	logger.Error("Error", slog.Any("error", fmt.Errorf("xxxx")))
+	logger.Error("Error", slog.Any("error", errors.New("xxxx")))
 	logger.Warn("Warn", "foo", "bar")
 	logger.Info("Info", "fizz", "buzz")
 	logger.Debug("Debug", "status", "hello, world")

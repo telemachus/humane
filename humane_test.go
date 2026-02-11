@@ -331,13 +331,13 @@ func TestHumaneConcurrentGroupHandling(t *testing.T) {
 	// Synchronize start of goroutines for maximum race potential.
 	start := make(chan struct{})
 
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			<-start
 
-			for j := 0; j < recordsPerGoroutine; j++ {
+			for j := range recordsPerGoroutine {
 				record := records[j%len(records)]
 				err := handler.Handle(context.Background(), record)
 				if err != nil {

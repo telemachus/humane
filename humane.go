@@ -140,7 +140,7 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 		return true
 	})
 	if h.addSource {
-		src := source(r)
+		src := r.Source()
 		if src != nil && (src.File != "" || src.Line != 0) {
 			sourceBuf := pooled.NewBuffer()
 			defer sourceBuf.Free()

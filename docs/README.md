@@ -47,8 +47,8 @@ a different handler.)
 ## Supported Go Versions
 
 `humane` follows [Go's release policy][release-policy]. It supports the latest
-two major versions of Go. Currently, that means Go 1.25 and Go 1.24. When Go
-1.26 is released, support for Go 1.24 will be dropped.
+two major versions of Go. Currently, that means Go 1.26 and Go 1.25. When Go
+1.27 is released, support for Go 1.25 will be dropped.
 
 [release-policy]: https://go.dev/doc/devel/release#policy
 

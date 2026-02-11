@@ -1,95 +1,117 @@
-linters-settings:
-  cyclop:
-    max-complexity: 10
-    package-average: 0.0
-    skip-tests: false
-  copyloopvar:
-    check-alias: true
-  depguard:
+version: "2"
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bidichk
+    - copyloopvar
+    - cyclop
+    - depguard
+    - dogsled
+    - dupl
+    - errcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - exptostd
+    - funlen
+    - gocheckcompilerdirectives
+    - goconst
+    - gocritic
+    - godoclint
+    - govet
+    - iface
+    - ineffassign
+    - intrange
+    - ireturn
+    - maintidx
+    - makezero
+    - mirror
+    - misspell
+    - nakedret
+    - nolintlint
+    - nonamedreturns
+    - paralleltest
+    - perfsprint
+    - prealloc
+    - predeclared
+    - recvcheck
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
+  settings:
+    copyloopvar:
+      check-alias: true
+    cyclop:
+      max-complexity: 10
+      package-average: 0
+    depguard:
       rules:
         main:
           files:
             - $all
           deny:
             - pkg: reflect
-              desc: "avoid reflect"
+              desc: avoid reflect
         test:
           files:
             - $all
           deny:
             - pkg: reflect
-              desc: "avoid reflect"
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-    exclude-functions:
-      - fmt.Printf
-      - fmt.Println
-      - fmt.Fprintf
-      - fmt.Fprintln
-      - strings.Builder.WriteString
-      - (*github.com/telemachus/humane/internal/pooled.Buffer).WriteByte
-      - (*github.com/telemachus/humane/internal/pooled.Buffer).WriteString
-  exhaustive:
-    default-signifies-exhaustive: true
-  goconst:
-    min-len: 2
-    min-occurrences: 3
-  gocritic:
-    disabled-checks:
-      - hugeParam
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-  govet:
-    enable-all: true
-    shadow:
-      strict: true
-  nolintlint:
-    require-explanation: true
-    require-specific: true
-
-linters:
-  disable-all: true
-  enable:
-    - bodyclose
-    - copyloopvar
-    - cyclop
-    - depguard
-    - dogsled
-    - errcheck
-    - errchkjson
-    - errname
-    - errorlint
-    - exhaustive
-    - goconst
-    - gocritic
-    - gosec
-    - gosimple
-    - govet
-    - ineffassign
-    - ireturn
-    - maintidx
-    - misspell
-    - nolintlint
-    - nakedret
-    - prealloc
-    - predeclared
-    - stylecheck
-    - thelper
-    - typecheck
-    - unconvert
-    - unparam
-    - unused
-    - whitespace
-
-
+              desc: avoid reflect
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      exclude-functions:
+        - fmt.Printf
+        - fmt.Println
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - strings.Builder.WriteString
+        - (*github.com/telemachus/humane/internal/pooled.Buffer).WriteByte
+        - (*github.com/telemachus/humane/internal/pooled.Buffer).WriteString
+    exhaustive:
+      default-signifies-exhaustive: true
+    goconst:
+      min-len: 2
+      min-occurrences: 3
+    gocritic:
+      disabled-checks:
+        - hugeParam
+        - unnamedResult
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    govet:
+      enable-all: true
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+  fix: false
 run:
-  concurrency: 8
+  timeout: 2m
+  concurrency: 0
   issues-exit-code: 1
-  timeout: 3m
   tests: true
   allow-parallel-runners: false

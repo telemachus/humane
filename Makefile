@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := test
 
 fmt:
-	golangci-lint run --disable-all --no-config -Egofmt --fix
-	golangci-lint run --disable-all --no-config -Egofumpt --fix
+	golangci-lint fmt --no-config -Egofmt
+	golangci-lint fmt --no-config -Egofumpt
 
 staticcheck: fmt
 	staticcheck .
