@@ -332,9 +332,7 @@ func TestHumaneConcurrentGroupHandling(t *testing.T) {
 	start := make(chan struct{})
 
 	for range numGoroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 
 			for j := range recordsPerGoroutine {
@@ -344,7 +342,7 @@ func TestHumaneConcurrentGroupHandling(t *testing.T) {
 					t.Errorf("Handle failed: %v", err)
 				}
 			}
-		}()
+		})
 	}
 
 	close(start)

@@ -20,7 +20,7 @@ func TestSlogtest(t *testing.T) {
 	h := humane.NewHandler(&buf, &humane.Options{TimeFormat: time.RFC3339})
 	results := func() []map[string]any {
 		ms := []map[string]any{}
-		for _, line := range bytes.Split(buf.Bytes(), []byte{'\n'}) {
+		for line := range bytes.SplitSeq(buf.Bytes(), []byte{'\n'}) {
 			if len(line) == 0 {
 				continue
 			}
