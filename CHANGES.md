@@ -1,5 +1,25 @@
 # humane version history
 
+## v0.8.0
+
++ Require Go 1.26 or later.
++ Remove the files for go:build now that Go 1.24 is unsupported.
++ Modernize tests and benchmarks.
+  E.g., `wg.Go`, `b.Loop`, `t.Context`, `slogtest.Run`, and `slices.Clone`.
++ Update the default time format to `"2006-01-02 15:04:05 MST"`.
+  The old format used a 12-hour clock without AM or PM.
++ Follow slog and quote empty keys and values (`""=v`, `e=""`).
++ Bug fix: quote keys and values that contain control characters.
+  E.g., prevent `\n` from breaking a record across lines.
++ Bug fix: follow slog and do not crash when a value's `MarshalText` or
+  `Error` method panics.
+  Print `<nil>` for a nil pointer; otherwise, fall back to `fmt`.
++ Bug fix: resolve and expand what `ReplaceAttr` returns.
+  Previously a returned group or `LogValuer` was printed as a single value.
++ Bug fix: do not apply `ReplaceAttr` to a zero time, as documented.
++ Bug fix: quote the time based on the formatted output rather than the
+  format string.
+
 ## v0.7.0
 
 + There are no changes to the public API.

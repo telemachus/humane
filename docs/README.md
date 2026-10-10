@@ -17,8 +17,8 @@ Handle formats a record in a human-friendly but largely structured way.
 Typical output will look like the following.
 
 ```shell
- INFO | Request processed | sku=24A2 branch=manhattan time="2023-04-02T10:50.09 EDT"
-ERROR | Connection failed | time=2024-01-23T17:14:03Z
+ INFO | Request processed | sku=24A2 branch=manhattan time="2023-04-02 10:50:09 EDT"
+ERROR | Connection failed | time="2024-01-23 17:14:03 UTC"
 ```
 
 Each line of output has three sections that are separated by " | ".
@@ -47,8 +47,8 @@ a different handler.)
 ## Supported Go Versions
 
 `humane` follows [Go's release policy][release-policy]. It supports the latest
-two major versions of Go. Currently, that means Go 1.25 and Go 1.24. When Go
-1.26 is released, support for Go 1.24 will be dropped.
+two major versions of Go. Currently, that means Go 1.27 and Go 1.26. When Go
+1.28 is released, support for Go 1.26 will be dropped.
 
 [release-policy]: https://go.dev/doc/devel/release#policy
 
@@ -67,8 +67,8 @@ logger.Info("My informative message", "foo", "bar", "bizz", "buzz")
 logger.Error("Ooops", slog.Any("error", err))
 
 // Output:
-//  INFO | My informative message | foo=bar bizz=buzz time="2023-04-02T10:50.09 EDT"
-// ERROR | Ooops | error="error message" time="2023-04-02T10:50.09 EDT"
+//  INFO | My informative message | foo=bar bizz=buzz time="2023-04-02 10:50:09 EDT"
+// ERROR | Ooops | error="error message" time="2023-04-02 10:50:09 EDT"
 
 // Use Options to change defaults. See the next section for more details.
 opts := &humane.Options{
@@ -81,7 +81,7 @@ logger.Info("This message will not be written because the level is too low.")
 
 ## Options
 
-+ `Level slog.Leveler`: Level defaults to slog.Info. You can use
++ `Level slog.Leveler`: Level defaults to `slog.LevelInfo`. You can use
   a [slog.Level](https://pkg.go.dev/log/slog#Level) to change the default. If
   you want something more complex, you can also implement
   a [slog.Leveler](https://pkg.go.dev/log/slog#Leveler).
@@ -95,7 +95,7 @@ logger.Info("This message will not be written because the level is too low.")
   the top level; thus, they ignore groups. In order to make the time and source
   attributes easy to test for, they use constants defined by slog for their
   keys: `slog.TimeKey` and `slog.SourceKey`.
-+ `TimeFormat string`: The time format defaults to `"2006-01-02T03:04.05 MST"`.
++ `TimeFormat string`: The time format defaults to `"2006-01-02 15:04:05 MST"`.
   You can use this option to set some other time format. (You can also tweak the
   time format via a ReplaceAttr function, but setting this option is easier for
   simple format changes.) The time attribute uses `slog.TimeKey` as its key.
@@ -137,7 +137,7 @@ function or a wrapper, then the source information may be wrong. See
 
 I'm using quite a lot of code from slog itself as well as from the [slog extras
 repository][slogextras]. The [guide to writing `slog` handlers][guide] was also
-very useful. Thanks to Jonathan Amsterdam for for all three of these. I've also
+very useful. Thanks to Jonathan Amsterdam for all three of these. I've also
 taken ideas and code from sources on [Go's wiki][wiki] as well as several blog
 posts about slog. See below for a list of resources. (Note that some of the
 resources are more or less out of date since slog and its API have changed over

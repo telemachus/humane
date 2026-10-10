@@ -1,6 +1,7 @@
 package humane
 
 import (
+	"cmp"
 	"context"
 	"encoding"
 	"fmt"
@@ -15,15 +16,9 @@ import (
 	"github.com/telemachus/humane/internal/pooled"
 )
 
-var (
+const (
 	defaultLevel      = slog.LevelInfo
-	defaultTimeFormat = "2006-01-02T03:04.05 MST"
-	levelValues       = map[slog.Level]string{
-		slog.LevelDebug: "DEBUG |",
-		slog.LevelInfo:  " INFO |",
-		slog.LevelWarn:  " WARN |",
-		slog.LevelError: "ERROR |",
-	}
+	defaultTimeFormat = "2006-01-02 15:04:05 MST"
 )
 
 type handler struct {
@@ -53,7 +48,7 @@ type handler struct {
 // ReplaceAttr to the time Attr (unless it's zero) and to the source Attr if
 // AddSource is true.
 //
-// TimeFormat defaults to "2006-01-02T03:04.05 MST". Set a format option to
+// TimeFormat defaults to "2006-01-02 15:04:05 MST". Set a format option to
 // customize the presentation of the time. (See [time.Time.Format] for details
 // about the format string.)
 //
@@ -67,28 +62,21 @@ type Options struct {
 	AddSource   bool
 }
 
-// NewHandler returns a [log/slog.Handler] using the receiver's options.
+// NewHandler returns a [log/slog.Handler] using the given options.
 // Default options are used if opts is nil.
 func NewHandler(w io.Writer, opts *Options) slog.Handler {
 	if opts == nil {
-		opts = &Options{}
+		opts = new(Options)
 	}
-	h := &handler{
+
+	return &handler{
 		w:           w,
-		mu:          &sync.Mutex{},
-		level:       opts.Level,
-		timeFormat:  opts.TimeFormat,
+		mu:          new(sync.Mutex),
+		level:       cmp.Or[slog.Leveler](opts.Level, defaultLevel),
+		timeFormat:  cmp.Or(opts.TimeFormat, defaultTimeFormat),
 		replaceAttr: opts.ReplaceAttr,
 		addSource:   opts.AddSource,
-		groups:      make([]string, 0, 10),
 	}
-	if opts.Level == nil {
-		h.level = defaultLevel
-	}
-	if h.timeFormat == "" {
-		h.timeFormat = defaultTimeFormat
-	}
-	return h
 }
 
 // Users should not call the following methods directly on a handler. Instead,
@@ -104,8 +92,8 @@ func (h *handler) Enabled(_ context.Context, l slog.Level) bool {
 //
 // Typical lines will look like the following:
 //
-//	 INFO | Request processed | sku=24A2 branch=manhattan time="2023-04-02T10:50.09 EDT"
-//	ERROR | Connection failed | time=2024-01-23T17:14:03Z
+//	INFO | Request processed | sku=24A2 branch=manhattan time="2023-04-02 10:50:09 EDT"
+//	ERROR | Connection failed | time="2024-01-23 17:14:03 UTC"
 //
 // More abstractly each line has three sections that are separated by " | ".
 //
@@ -121,8 +109,7 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	defer buf.Free()
 	// If ReplaceAttr is nil, groups can be nil.
 	var groups *pooled.StringSlice
-	hasReplaceAttr := h.replaceAttr != nil
-	if hasReplaceAttr {
+	if h.replaceAttr != nil {
 		groups = pooled.NewStringSlice()
 		defer groups.Free()
 		groups.Append(h.groups...)
@@ -132,39 +119,27 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	buf.WriteByte(' ')
 	buf.WriteString(r.Message)
 	buf.WriteString(" |")
-	if h.attrs != "" {
-		buf.WriteString(h.attrs)
-	}
+	buf.WriteString(h.attrs)
 	r.Attrs(func(a slog.Attr) bool {
 		h.appendAttr(buf, a, h.groupPrefix, groups)
 		return true
 	})
 	if h.addSource {
-		src := source(r)
+		src := r.Source()
 		if src != nil && (src.File != "" || src.Line != 0) {
-			sourceBuf := pooled.NewBuffer()
-			defer sourceBuf.Free()
-			sourceBuf.WriteString(src.File)
-			sourceBuf.WriteByte(':')
-			sourceBuf.WriteString(strconv.Itoa(src.Line))
-			sourceAttr := slog.String(slog.SourceKey, sourceBuf.String())
+			sourceAttr := slog.String(slog.SourceKey, src.File+":"+strconv.Itoa(src.Line))
 			h.appendAttr(buf, sourceAttr, "", nil)
 		}
 	}
-	timeAttr := slog.Time(slog.TimeKey, r.Time)
-	if hasReplaceAttr {
-		// Pass nil since we format time outside of groups.
-		timeAttr = h.replaceAttr(nil, timeAttr)
-	}
-	if !r.Time.IsZero() && !timeAttr.Equal(slog.Attr{}) {
-		appendKey(buf, "", timeAttr.Key)
-		h.appendVal(buf, timeAttr.Value)
+	if !r.Time.IsZero() {
+		h.appendAttr(buf, slog.Time(slog.TimeKey, r.Time), "", nil)
 	}
 	buf.WriteByte('\n')
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	_, err := h.w.Write(*buf)
-	return err
+
+	return err //nolint:wrapcheck // Do as slog does and pass this unwrapped.
 }
 
 // WithAttrs returns a new [log/slog.Handler] that has the receiver's
@@ -188,6 +163,7 @@ func (h *handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		h2.appendAttr(buf, a, h.groupPrefix, groups)
 	}
 	h2.attrs += string(*buf)
+
 	return h2
 }
 
@@ -204,6 +180,7 @@ func (h *handler) WithGroup(name string) slog.Handler {
 		h2.groupPrefix = h.groupPrefix + "." + name
 	}
 	h2.groups = append(h2.groups, name)
+
 	return h2
 }
 
@@ -223,66 +200,72 @@ func (h *handler) clone() *handler {
 }
 
 func appendLevel(buf *pooled.Buffer, level slog.Level) {
-	if lVal, ok := levelValues[level.Level()]; ok {
-		buf.WriteString(lVal)
-		return
+	switch level {
+	case slog.LevelDebug:
+		buf.WriteString("DEBUG |")
+	case slog.LevelInfo:
+		buf.WriteString(" INFO |")
+	case slog.LevelWarn:
+		buf.WriteString(" WARN |")
+	case slog.LevelError:
+		buf.WriteString("ERROR |")
+	default:
+		buf.WriteByte(' ')
+		buf.WriteString(level.String())
+		buf.WriteString(" |")
 	}
-	buf.WriteByte(' ')
-	buf.WriteString(level.Level().String())
-	buf.WriteString(" |")
 }
 
-//nolint:cyclop // This function simply *is* complex.
 func (h *handler) appendAttr(buf *pooled.Buffer, a slog.Attr, groupPrefix string, groups *pooled.StringSlice) {
 	a.Value = a.Value.Resolve()
-	if a.Value.Kind() == slog.KindGroup {
-		attrs := a.Value.Group()
-		if len(attrs) == 0 {
-			return
+	if h.replaceAttr != nil && a.Value.Kind() != slog.KindGroup {
+		var gs []string
+		if groups != nil {
+			gs = *groups
 		}
-		var newGroupPrefix string
-
-		if a.Key != "" {
-			if groupPrefix == "" {
-				newGroupPrefix = a.Key
-			} else {
-				newGroupPrefix = groupPrefix + "." + a.Key
-			}
-			if groups != nil {
-				groups.Append(a.Key)
-			}
-		} else {
-			newGroupPrefix = groupPrefix
-		}
-
-		for _, a := range attrs {
-			h.appendAttr(buf, a, newGroupPrefix, groups)
-		}
-
-		if a.Key != "" && groups != nil {
-			*groups = (*groups)[:groups.Len()-1]
-		}
+		a = h.replaceAttr(gs, a)
+		a.Value = a.Value.Resolve()
+	}
+	if a.Equal(slog.Attr{}) {
 		return
 	}
+	if a.Value.Kind() == slog.KindGroup {
+		h.appendGroup(buf, a, groupPrefix, groups)
+		return
+	}
+	appendKey(buf, groupPrefix, a.Key)
+	h.appendVal(buf, a.Value)
+}
 
-	var groupsSlice []string
-	if groups != nil {
-		groupsSlice = *groups
+func (h *handler) appendGroup(buf *pooled.Buffer, a slog.Attr, groupPrefix string, groups *pooled.StringSlice) {
+	attrs := a.Value.Group()
+	if len(attrs) == 0 {
+		return
 	}
-	if h.replaceAttr != nil {
-		a = h.replaceAttr(groupsSlice, a)
+	newGroupPrefix := groupPrefix
+	if a.Key != "" {
+		if groupPrefix == "" {
+			newGroupPrefix = a.Key
+		} else {
+			newGroupPrefix = groupPrefix + "." + a.Key
+		}
+		if groups != nil {
+			groups.Append(a.Key)
+		}
 	}
-	if !a.Equal(slog.Attr{}) {
-		appendKey(buf, groupPrefix, a.Key)
-		h.appendVal(buf, a.Value)
+	for _, child := range attrs {
+		h.appendAttr(buf, child, newGroupPrefix, groups)
+	}
+	if a.Key != "" && groups != nil {
+		*groups = (*groups)[:groups.Len()-1]
 	}
 }
 
-func appendKey(buf *pooled.Buffer, groups, key string) {
+func appendKey(buf *pooled.Buffer, groupPrefix, key string) {
 	buf.WriteByte(' ')
 	var fullKey string
-	if groups != "" {
-		fullKey = groups + "." + key
+	if groupPrefix != "" {
+		fullKey = groupPrefix + "." + key
 	} else {
 		fullKey = key
 	}
@@ -294,7 +277,6 @@ func appendKey(buf *pooled.Buffer, groups, key string) {
 	buf.WriteByte('=')
 }
 
-//nolint:cyclop // This function simply *is* complex.
 func (h *handler) appendVal(buf *pooled.Buffer, val slog.Value) {
 	switch val.Kind() {
 	case slog.KindString:
@@ -310,50 +292,84 @@ func (h *handler) appendVal(buf *pooled.Buffer, val slog.Value) {
 	case slog.KindDuration:
 		appendString(buf, val.Duration().String())
 	case slog.KindTime:
-		// This is crude: if timeFormat needs quoting, we simply quote
-		// the entire formatted time string.
-		//
-		// If the user must have a time with quotes, they should use
-		// ReplaceAttr to change the Kind to slog.String.
-		quoteTime := needsQuoting(h.timeFormat)
-		if quoteTime {
-			buf.WriteByte('"')
-		}
+		// Quote based on what the format produced, not on the format itself.
+		start := len(*buf)
 		*buf = val.Time().AppendFormat(*buf, h.timeFormat)
-		if quoteTime {
-			buf.WriteByte('"')
+		if s := string((*buf)[start:]); needsQuoting(s) {
+			*buf = (*buf)[:start]
+			appendQuoted(buf, s)
 		}
-	case slog.KindAny, slog.KindGroup, slog.KindLogValuer:
-		if tm, ok := val.Any().(encoding.TextMarshaler); ok {
-			data, err := tm.MarshalText()
-			if err != nil {
-				appendString(buf, fmt.Sprintf("!ERROR:%v", err))
-				return
-			}
-			appendString(buf, string(data))
+	case slog.KindGroup, slog.KindLogValuer, slog.KindAny:
+		appendAny(buf, val.Any())
+	}
+}
+
+func appendAny(buf *pooled.Buffer, v any) {
+	defer func() {
+		if recover() != nil {
+			// fmt recovers from nil-receiver panics and prints <nil>.
+			appendString(buf, fmt.Sprint(v))
+		}
+	}()
+
+	if tm, ok := v.(encoding.TextMarshaler); ok {
+		data, err := tm.MarshalText()
+		if err != nil {
+			appendString(buf, "!ERROR:"+err.Error())
 			return
 		}
-		appendString(buf, fmt.Sprint(val.Any()))
+		appendString(buf, string(data))
+
+		return
 	}
+	if err, ok := v.(error); ok {
+		appendString(buf, err.Error())
+		return
+	}
+	appendString(buf, fmt.Sprint(v))
 }
 
 func appendString(buf *pooled.Buffer, s string) {
 	if needsQuoting(s) {
-		*buf = strconv.AppendQuote(*buf, s)
+		appendQuoted(buf, s)
 	} else {
 		buf.WriteString(s)
 	}
 }
 
+func appendQuoted(buf *pooled.Buffer, s string) {
+	if needsEscaping(s) {
+		*buf = strconv.AppendQuote(*buf, s)
+		return
+	}
+	buf.WriteByte('"')
+	buf.WriteString(s)
+	buf.WriteByte('"')
+}
+
+func needsEscaping(s string) bool {
+	for i := range len(s) {
+		if c := s[i]; c < 0x20 || c >= 0x7f || c == '"' || c == '\\' {
+			return true
+		}
+	}
+
+	return false
+}
+
 func needsQuoting(s string) bool {
+	if s == "" {
+		return true
+	}
 	for i := 0; i < len(s); {
 		b := s[i]
 		// Handle ASCII characters quickly.
 		if b < utf8.RuneSelf {
-			if unsafe[b] {
+			if mustQuoteChars[b] {
 				return true
 			}
 			i++
+
 			continue
 		}
 		r, size := utf8.DecodeRuneInString(s[i:])
@@ -362,18 +378,23 @@ func needsQuoting(s string) bool {
 		}
 		i += size
 	}
+
 	return false
 }
 
 // Adapted from log/slog/json_handler.go which copied the original from
 // encoding/json/tables.go.
 //
-// unsafe holds the value true if the ASCII character requires a logfmt key or
-// value to be quoted.
+// mustQuoteChars reports, for each ASCII byte, whether a logfmt key or value
+// that contains it must be quoted. needsQuoting handles non-ASCII runes.
 //
-// All values are safe except for ' ', '"', and '='. Note that a map is far slower.
-var unsafe = [utf8.RuneSelf]bool{
-	' ': true,
-	'"': true,
-	'=': true,
-}
+// Note that a map is far slower.
+var mustQuoteChars = func() [utf8.RuneSelf]bool {
+	var t [utf8.RuneSelf]bool
+	for b := range byte(0x20) {
+		t[b] = true
+	}
+	t[0x7f], t[' '], t['"'], t['='] = true, true, true, true
+
+	return t
+}()

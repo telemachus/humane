@@ -17,40 +17,38 @@ import (
 func TestSlogtest(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	h := humane.NewHandler(&buf, &humane.Options{TimeFormat: time.RFC3339})
-	results := func() []map[string]any {
-		ms := []map[string]any{}
-		for _, line := range bytes.Split(buf.Bytes(), []byte{'\n'}) {
-			if len(line) == 0 {
-				continue
-			}
-			m, err := parseHumane(line)
-			if err != nil {
-				t.Fatal(err)
-			}
-			ms = append(ms, m)
+	newHandler := func(*testing.T) slog.Handler {
+		buf.Reset()
+		return humane.NewHandler(&buf, &humane.Options{TimeFormat: time.RFC3339})
+	}
+	result := func(t *testing.T) map[string]any {
+		t.Helper()
+		m, err := parseHumane(buf.Bytes())
+		if err != nil {
+			t.Fatal(err)
 		}
-		return ms
+
+		return m
 	}
-	if err := slogtest.TestHandler(h, results); err != nil {
-		t.Error(err)
-	}
+	slogtest.Run(t, newHandler, result)
 }
 
 func parseHumane(bs []byte) (map[string]any, error) {
 	top := map[string]any{}
 	s := string(bytes.TrimSpace(bs))
-	// First, we need to divide each line into three parts (level, message,
-	// kv pairs). Humane delimits these three parts by " | ".
-	// Then we need to create proper key-value pairs for level and message.
-	pieces := strings.Split(s, " | ")
-	top[slog.LevelKey] = strings.TrimSpace(pieces[0])
-	top[slog.MessageKey] = strings.TrimSpace(pieces[1])
+	// Divide each line into level, message, and key-value pairs. Humane
+	// separates the level from the message with " | ", and the message
+	// from the pairs with " |", which is all that remains when there
+	// are no pairs.
+	level, afterLevel, _ := strings.Cut(s, " | ")
+	msg, attrs, _ := strings.Cut(afterLevel, " |")
+	top[slog.LevelKey] = strings.TrimSpace(level)
+	top[slog.MessageKey] = strings.TrimSpace(msg)
 	// The rest of the line contains kv pairs that we can (roughly) divide
 	// by spaces. This is crude since it will split a quoted key or value
 	// that contains a space. For this test, however, this will work---as
 	// long as we set a time format without whitespace.
-	s = pieces[2]
+	s = strings.TrimSpace(attrs)
 	for s != "" {
 		kv, rest, _ := strings.Cut(s, " ")
 		k, value, found := strings.Cut(kv, "=")
@@ -77,5 +75,6 @@ func parseHumane(bs []byte) (map[string]any, error) {
 		m[keys[len(keys)-1]] = value
 		s = rest
 	}
+
 	return top, nil
 }

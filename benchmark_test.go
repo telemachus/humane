@@ -1,7 +1,6 @@
 package humane_test
 
 import (
-	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -31,11 +30,10 @@ var slogAttrs = []slog.Attr{
 
 func BenchmarkBasic_Slog(b *testing.B) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		logger.LogAttrs(
-			context.Background(),
+			b.Context(),
 			slog.LevelInfo,
 			"message",
 			slogAttrs...,
@@ -45,11 +43,10 @@ func BenchmarkBasic_Slog(b *testing.B) {
 
 func BenchmarkBasic_Humane(b *testing.B) {
 	logger := slog.New(humane.NewHandler(io.Discard, nil))
-	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		logger.LogAttrs(
-			context.Background(),
+			b.Context(),
 			slog.LevelInfo,
 			"message",
 			slogAttrs...,
@@ -59,11 +56,8 @@ func BenchmarkBasic_Humane(b *testing.B) {
 
 func BenchmarkDeeplyNestedGroups_Slog(b *testing.B) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	b.ResetTimer()
 	b.ReportAllocs()
-
-	for range b.N {
+	for b.Loop() {
 		logger.Info("message",
 			slog.Group("l1",
 				slog.String("a", "1"),
@@ -87,10 +81,9 @@ func BenchmarkDeeplyNestedGroups_Slog(b *testing.B) {
 func BenchmarkDeeplyNestedGroups_Humane(b *testing.B) {
 	logger := slog.New(humane.NewHandler(io.Discard, nil))
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		logger.Info("message",
 			slog.Group("l1",
 				slog.String("a", "1"),
@@ -120,10 +113,9 @@ func BenchmarkWithGroupChaining_Slog(b *testing.B) {
 		WithGroup("g5")
 	logger := slog.New(handler)
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		logger.Info("message", "key", "value")
 	}
 }
@@ -137,10 +129,9 @@ func BenchmarkWithGroupChaining_Humane(b *testing.B) {
 		WithGroup("g5")
 	logger := slog.New(handler)
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		logger.Info("message", "key", "value")
 	}
 }
@@ -154,10 +145,9 @@ func BenchmarkWithAttrsChaining_Slog(b *testing.B) {
 		WithAttrs([]slog.Attr{slog.String("e", "5")})
 	logger := slog.New(handler)
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		logger.Info("message", "key", "value")
 	}
 }
@@ -171,10 +161,9 @@ func BenchmarkWithAttrsChaining_Humane(b *testing.B) {
 		WithAttrs([]slog.Attr{slog.String("e", "5")})
 	logger := slog.New(handler)
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		logger.Info("message", "key", "value")
 	}
 }
@@ -188,10 +177,9 @@ func BenchmarkMixedGroupsAndAttrs_Slog(b *testing.B) {
 		WithGroup("db")
 	logger := slog.New(handler)
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		logger.Info("query", "table", "users", "rows", 42)
 	}
 }
@@ -205,10 +193,9 @@ func BenchmarkMixedGroupsAndAttrs_Humane(b *testing.B) {
 		WithGroup("db")
 	logger := slog.New(handler)
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		logger.Info("query", "table", "users", "rows", 42)
 	}
 }
@@ -218,18 +205,18 @@ func BenchmarkWithReplaceAttr_Slog(b *testing.B) {
 		if a.Key == "sensitive" {
 			return slog.String("sensitive", "REDACTED")
 		}
+
 		return a
 	}
 
 	opts := &slog.HandlerOptions{ReplaceAttr: replaceAttr}
 	logger := slog.New(slog.NewTextHandler(io.Discard, opts))
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		logger.LogAttrs(
-			context.Background(),
+			b.Context(),
 			slog.LevelInfo,
 			"message",
 			slogAttrs...,
@@ -242,18 +229,18 @@ func BenchmarkWithReplaceAttr_Humane(b *testing.B) {
 		if a.Key == "sensitive" {
 			return slog.String("sensitive", "REDACTED")
 		}
+
 		return a
 	}
 
 	opts := &humane.Options{ReplaceAttr: replaceAttr}
 	logger := slog.New(humane.NewHandler(io.Discard, opts))
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		logger.LogAttrs(
-			context.Background(),
+			b.Context(),
 			slog.LevelInfo,
 			"message",
 			slogAttrs...,
@@ -270,7 +257,7 @@ func BenchmarkParallelLogging_Slog(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			logger.LogAttrs(
-				context.Background(),
+				b.Context(),
 				slog.LevelInfo,
 				"message",
 				slogAttrs...,
@@ -288,7 +275,7 @@ func BenchmarkParallelLogging_Humane(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			logger.LogAttrs(
-				context.Background(),
+				b.Context(),
 				slog.LevelInfo,
 				"message",
 				slogAttrs...,

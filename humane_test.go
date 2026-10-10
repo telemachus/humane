@@ -2,11 +2,12 @@ package humane_test
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ func removeTime(groups []string, a slog.Attr) slog.Attr {
 	if a.Key == slog.TimeKey && len(groups) == 0 {
 		return slog.Attr{}
 	}
+
 	return a
 }
 
@@ -37,7 +39,22 @@ func removeTimeTrimSource(_ []string, a slog.Attr) slog.Attr {
 func TestHumaneNilOpts(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	slog.New(humane.NewHandler(&buf, nil))
+	h := humane.NewHandler(&buf, nil)
+	if h.Enabled(t.Context(), slog.LevelDebug) {
+		t.Error("Enabled(LevelDebug) = true; want false")
+	}
+	if !h.Enabled(t.Context(), slog.LevelInfo) {
+		t.Error("Enabled(LevelInfo) = false; want true")
+	}
+	r := slog.NewRecord(time.Date(2026, time.October, 5, 15, 4, 5, 0, time.UTC), slog.LevelInfo, "foo", 0)
+	if err := h.Handle(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	want := ` INFO | foo | time="2026-10-05 15:04:05 UTC"` + "\n"
+	if got != want {
+		t.Errorf("Handle with nil opts = %q; want %q", got, want)
+	}
 }
 
 func TestHumaneBasic(t *testing.T) {
@@ -96,18 +113,52 @@ func TestHumaneAddSource(t *testing.T) {
 func TestHumaneCustomTimeFormat(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	timeFormat := "2006-01-02"
-	opts := &humane.Options{TimeFormat: timeFormat}
-	logger := slog.New(humane.NewHandler(&buf, opts))
-	logger.Info("foo")
+	h := humane.NewHandler(&buf, &humane.Options{TimeFormat: "2006-01-02"})
+	r := slog.NewRecord(time.Date(2026, time.October, 5, 23, 59, 59, 0, time.UTC), slog.LevelInfo, "foo", 0)
+	if err := h.Handle(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
 	got := buf.String()
-	want := fmt.Sprintf(
-		" INFO | foo | %s=%s\n",
-		slog.TimeKey,
-		time.Now().Format(timeFormat),
-	)
+	want := " INFO | foo | time=2026-10-05\n"
 	if got != want {
-		t.Errorf(`logger.Info("foo") (TimeFormat %q) = %q; want %q`, timeFormat, got, want)
+		t.Errorf(`Handle with TimeFormat "2006-01-02" = %q; want %q`, got, want)
+	}
+}
+
+func TestHumaneTimeQuotedByOutput(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	h := humane.NewHandler(&buf, &humane.Options{TimeFormat: "Jan_2"})
+	r := slog.NewRecord(time.Date(2026, time.October, 5, 12, 0, 0, 0, time.UTC), slog.LevelInfo, "foo", 0)
+	if err := h.Handle(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	want := ` INFO | foo | time="Oct 5"` + "\n"
+	if got != want {
+		t.Errorf(`Handle with TimeFormat "Jan_2" = %q; want %q`, got, want)
+	}
+}
+
+func TestHumaneEmptyKeyAndValue(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		want string
+		args []any
+	}{
+		"empty key":   {args: []any{"", "v"}, want: " INFO | m | \"\"=v\n"},
+		"empty value": {args: []any{"e", ""}, want: " INFO | m | e=\"\"\n"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var buf bytes.Buffer
+			logger := slog.New(humane.NewHandler(&buf, &humane.Options{ReplaceAttr: removeTime}))
+			logger.Info("m", tc.args...)
+			if got := buf.String(); got != tc.want {
+				t.Errorf("logger.Info(%q, %q...) = %q; want %q", "m", tc.args, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -243,6 +294,18 @@ func TestQuotingForAttrs(t *testing.T) {
 			args: []any{`foo"foo`, "bar"},
 			want: ` INFO | message | "foo\"foo"=bar` + "\n",
 		},
+		{
+			name: "newline in value",
+			desc: `log.Info("foo", "bar\nbar")`,
+			args: []any{"foo", "bar\nbar"},
+			want: ` INFO | message | foo="bar\nbar"` + "\n",
+		},
+		{
+			name: "backslash in quoted value",
+			desc: `log.Info("foo", "a\b c")`,
+			args: []any{"foo", `a\b c`},
+			want: ` INFO | message | foo="a\\b c"` + "\n",
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -307,22 +370,15 @@ func TestHumaneConcurrentGroupHandling(t *testing.T) {
 	opts := &humane.Options{ReplaceAttr: removeTime}
 	handler := humane.NewHandler(&buf, opts)
 
-	records := []slog.Record{
-		func() slog.Record {
-			r := slog.NewRecord(time.Now(), slog.LevelInfo, "msg1", 0)
-			r.AddAttrs(slog.Group("req",
-				slog.Group("db", slog.String("query", "SELECT")),
-				slog.String("id", "123")))
-			return r
-		}(),
-		func() slog.Record {
-			r := slog.NewRecord(time.Now(), slog.LevelWarn, "msg2", 0)
-			r.AddAttrs(slog.Group("auth",
-				slog.String("user", "alice"),
-				slog.Group("perms", slog.Bool("admin", false))))
-			return r
-		}(),
-	}
+	r1 := slog.NewRecord(time.Now(), slog.LevelInfo, "msg1", 0)
+	r1.AddAttrs(slog.Group("req",
+		slog.Group("db", slog.String("query", "SELECT")),
+		slog.String("id", "123")))
+	r2 := slog.NewRecord(time.Now(), slog.LevelWarn, "msg2", 0)
+	r2.AddAttrs(slog.Group("auth",
+		slog.String("user", "alice"),
+		slog.Group("perms", slog.Bool("admin", false))))
+	records := []slog.Record{r1, r2}
 
 	const numGoroutines = 100
 	const recordsPerGoroutine = 10
@@ -331,31 +387,37 @@ func TestHumaneConcurrentGroupHandling(t *testing.T) {
 	// Synchronize start of goroutines for maximum race potential.
 	start := make(chan struct{})
 
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range numGoroutines {
+		wg.Go(func() {
 			<-start
 
-			for j := 0; j < recordsPerGoroutine; j++ {
+			for j := range recordsPerGoroutine {
 				record := records[j%len(records)]
-				err := handler.Handle(context.Background(), record)
+				err := handler.Handle(t.Context(), record)
 				if err != nil {
 					t.Errorf("Handle failed: %v", err)
 				}
 			}
-		}()
+		})
 	}
 
 	close(start)
 	wg.Wait()
 
-	output := buf.String()
-	if !strings.Contains(output, "req.db.query=") {
-		t.Error("Expected nested group output not found")
+	const (
+		line1 = " INFO | msg1 | req.db.query=SELECT req.id=123\n"
+		line2 = " WARN | msg2 | auth.user=alice auth.perms.admin=false\n"
+	)
+	want := map[string]int{
+		line1: numGoroutines * recordsPerGoroutine / 2,
+		line2: numGoroutines * recordsPerGoroutine / 2,
 	}
-	if !strings.Contains(output, "auth.perms.admin=") {
-		t.Error("Expected nested group output not found")
+	got := map[string]int{}
+	for line := range strings.Lines(buf.String()) {
+		got[line]++
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("concurrent Handle output mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -413,7 +475,8 @@ func TestReplaceAttrGroupsInWithAttrs(t *testing.T) {
 		if a.Key == slog.TimeKey {
 			return slog.Attr{}
 		}
-		receivedGroups = append(receivedGroups, append([]string(nil), groups...))
+		receivedGroups = append(receivedGroups, slices.Clone(groups))
+
 		return a
 	}
 
@@ -449,9 +512,10 @@ func TestReplaceAttrGroupsSlice(t *testing.T) {
 		}
 		got = append(got, attrContext{
 			// Avoid slice reuse.
-			Groups: append([]string(nil), groups...),
+			Groups: slices.Clone(groups),
 			Key:    a.Key,
 		})
+
 		return a
 	}
 
@@ -493,11 +557,12 @@ func TestReplaceAttrGroupsForSource(t *testing.T) {
 	var sourceGroups []string
 	replaceAttr := func(groups []string, a slog.Attr) slog.Attr {
 		if a.Key == slog.SourceKey {
-			sourceGroups = append([]string(nil), groups...)
+			sourceGroups = slices.Clone(groups)
 		}
 		if a.Key == slog.TimeKey {
 			return slog.Attr{}
 		}
+
 		return a
 	}
 	opts := &humane.Options{ReplaceAttr: replaceAttr, AddSource: true}
@@ -505,5 +570,49 @@ func TestReplaceAttrGroupsForSource(t *testing.T) {
 	logger.Info("message")
 	if len(sourceGroups) != 0 {
 		t.Errorf("got %v; ReplaceAttr for source should receive nil for groups", sourceGroups)
+	}
+}
+
+func TestHumaneNilTextMarshaler(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	logger := slog.New(humane.NewHandler(&buf, &humane.Options{ReplaceAttr: removeTime}))
+	var ip *netip.Addr
+	logger.Info("m", "ip", ip)
+	got := buf.String()
+	want := " INFO | m | ip=<nil>\n"
+	if got != want {
+		t.Errorf(`logger.Info("m", "ip", (*netip.Addr)(nil)) = %q; want %q`, got, want)
+	}
+}
+
+func TestReplaceAttrReturnsGroup(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	replace := func(groups []string, a slog.Attr) slog.Attr {
+		if a.Key == "y" && len(groups) == 0 {
+			return slog.Group("y", slog.Int("a", 1))
+		}
+
+		return removeTime(groups, a)
+	}
+	logger := slog.New(humane.NewHandler(&buf, &humane.Options{ReplaceAttr: replace}))
+	logger.Info("m", "y", 0)
+	got := buf.String()
+	want := " INFO | m | y.a=1\n"
+	if got != want {
+		t.Errorf("ReplaceAttr returning a group = %q; want %q", got, want)
+	}
+}
+
+func TestHumaneNonStandardLevel(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	logger := slog.New(humane.NewHandler(&buf, &humane.Options{ReplaceAttr: removeTime}))
+	logger.Log(t.Context(), slog.LevelInfo+2, "m")
+	got := buf.String()
+	want := " INFO+2 | m |\n"
+	if got != want {
+		t.Errorf("logger.Log(LevelInfo+2, %q) = %q; want %q", "m", got, want)
 	}
 }
