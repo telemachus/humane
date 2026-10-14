@@ -3,10 +3,8 @@
 fmt:
 	golangci-lint fmt --no-config -Egofumpt
 
-# Pinned to go1.27.1: staticcheck can't read go1.27.2's export data yet.
-# Remove once a staticcheck release supports it.
 staticcheck:
-	GOTOOLCHAIN=go1.27.1 staticcheck ./...
+	staticcheck ./...
 
 revive:
 	revive -config revive.toml ./...
