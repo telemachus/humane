@@ -304,15 +304,15 @@ func (h *handler) appendVal(buf *pooled.Buffer, val slog.Value) {
 	}
 }
 
-func appendAny(buf *pooled.Buffer, v any) {
+func appendAny(buf *pooled.Buffer, anyVal any) {
 	defer func() {
 		if recover() != nil {
 			// fmt recovers from nil-receiver panics and prints <nil>.
-			appendString(buf, fmt.Sprint(v))
+			appendString(buf, fmt.Sprint(anyVal))
 		}
 	}()
 
-	if tm, ok := v.(encoding.TextMarshaler); ok {
+	if tm, ok := anyVal.(encoding.TextMarshaler); ok {
 		data, err := tm.MarshalText()
 		if err != nil {
 			appendString(buf, "!ERROR:"+err.Error())
@@ -322,11 +322,11 @@ func appendAny(buf *pooled.Buffer, v any) {
 
 		return
 	}
-	if err, ok := v.(error); ok {
+	if err, ok := anyVal.(error); ok {
 		appendString(buf, err.Error())
 		return
 	}
-	appendString(buf, fmt.Sprint(v))
+	appendString(buf, fmt.Sprint(anyVal))
 }
 
 func appendString(buf *pooled.Buffer, s string) {
@@ -357,12 +357,12 @@ func needsEscaping(s string) bool {
 	return false
 }
 
-func needsQuoting(s string) bool {
-	if s == "" {
+func needsQuoting(str string) bool {
+	if str == "" {
 		return true
 	}
-	for i := 0; i < len(s); {
-		b := s[i]
+	for i := 0; i < len(str); {
+		b := str[i]
 		// Handle ASCII characters quickly.
 		if b < utf8.RuneSelf {
 			if mustQuoteChars[b] {
@@ -372,7 +372,7 @@ func needsQuoting(s string) bool {
 
 			continue
 		}
-		r, size := utf8.DecodeRuneInString(s[i:])
+		r, size := utf8.DecodeRuneInString(str[i:])
 		if r == utf8.RuneError || unicode.IsSpace(r) || !unicode.IsPrint(r) {
 			return true
 		}

@@ -24,6 +24,7 @@ linters:
     - godot
     - govet
     - iface
+    - importas
     - inamedparam
     - ineffassign
     - interfacebloat
@@ -53,6 +54,7 @@ linters:
     - unused
     - usestdlibvars
     - usetesting
+    - varnamelen
     - wastedassign
     - whitespace
     - wrapcheck
@@ -60,8 +62,10 @@ linters:
     rules:
       - path: _test\.go
         linters:
+          - dupl
           - funlen
           - goconst
+          - wrapcheck
   settings:
     copyloopvar:
       check-alias: true
@@ -84,6 +88,7 @@ linters:
       check-type-assertions: true
       check-blank: true
       exclude-functions:
+        - errors.AsType
         - fmt.Print
         - fmt.Printf
         - fmt.Println
@@ -116,6 +121,20 @@ linters:
     nolintlint:
       require-explanation: true
       require-specific: true
+    varnamelen:
+      max-distance: 10
+      min-name-length: 2
+      ignore-decls:
+        - i int
+        - r slog.Record
+        - a slog.Attr
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

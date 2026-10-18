@@ -14,21 +14,27 @@ golangci:
 
 lint: staticcheck revive golangci
 
-build: lint
-	go build ./...
+vuln:
+	govulncheck ./...
 
 test:
 	go test -shuffle on ./...
 
+testv:
+	go test -shuffle on -v ./...
+
 testr:
 	go test -race -shuffle on ./...
 
-testv:
-	go test -shuffle on -v ./...
+build: lint testr
+	go build ./...
 
 clean:
 	go clean
 	rm -f bench-baseline.txt bench-new.txt
+
+cacheclean:
+	go clean -testcache
 
 bench-quick:
 	go test -bench='Basic|WithGroupChaining|WithAttrsChaining' -benchmem -benchtime=1s -count=3 -run=NONE
@@ -43,7 +49,6 @@ bench-compare:
 	go test -bench=Humane -benchmem -benchtime=1s -count=6 -run=NONE > bench-new.txt
 	benchstat bench-baseline.txt bench-new.txt
 
-.PHONY: fmt staticcheck revive golangci lint
-.PHONY: test testv testr
+.PHONY: fmt staticcheck revive golangci lint vuln
+.PHONY: test testv testr build clean cacheclean
 .PHONY: bench-quick bench bench-baseline bench-compare
-.PHONY: build clean

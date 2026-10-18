@@ -35,12 +35,12 @@ func TestSlogtest(t *testing.T) {
 
 func parseHumane(bs []byte) (map[string]any, error) {
 	top := map[string]any{}
-	s := string(bytes.TrimSpace(bs))
+	line := string(bytes.TrimSpace(bs))
 	// Divide each line into level, message, and key-value pairs. Humane
 	// separates the level from the message with " | ", and the message
 	// from the pairs with " |", which is all that remains when there
 	// are no pairs.
-	level, afterLevel, _ := strings.Cut(s, " | ")
+	level, afterLevel, _ := strings.Cut(line, " | ")
 	msg, attrs, _ := strings.Cut(afterLevel, " |")
 	top[slog.LevelKey] = strings.TrimSpace(level)
 	top[slog.MessageKey] = strings.TrimSpace(msg)
@@ -48,33 +48,42 @@ func parseHumane(bs []byte) (map[string]any, error) {
 	// by spaces. This is crude since it will split a quoted key or value
 	// that contains a space. For this test, however, this will work---as
 	// long as we set a time format without whitespace.
-	s = strings.TrimSpace(attrs)
-	for s != "" {
-		kv, rest, _ := strings.Cut(s, " ")
-		k, value, found := strings.Cut(kv, "=")
+	rest := strings.TrimSpace(attrs)
+	for rest != "" {
+		var kv string
+		kv, rest, _ = strings.Cut(rest, " ")
+		path, value, found := strings.Cut(kv, "=")
 		if !found {
 			return nil, fmt.Errorf("no '=' in %q", kv)
 		}
-		keys := strings.Split(k, ".")
-		// Populate a tree of maps for a dotted path such as "a.b.c=x".
-		m := top
-		for _, key := range keys[:len(keys)-1] {
-			x, ok := m[key]
-			var m2 map[string]any
-			if !ok {
-				m2 = map[string]any{}
-				m[key] = m2
-			} else {
-				m2, ok = x.(map[string]any)
-				if !ok {
-					return nil, fmt.Errorf("value for %q in composite key %q is not map[string]any", key, k)
-				}
-			}
-			m = m2
+		if err := setPath(top, path, value); err != nil {
+			return nil, err
 		}
-		m[keys[len(keys)-1]] = value
-		s = rest
 	}
 
 	return top, nil
+}
+
+// setPath populates a tree of maps under top for a dotted path such as
+// "a.b.c", and it stores value at the final key.
+func setPath(top map[string]any, path, value string) error {
+	keys := strings.Split(path, ".")
+	node := top
+	for _, key := range keys[:len(keys)-1] {
+		x, ok := node[key]
+		var child map[string]any
+		if !ok {
+			child = map[string]any{}
+			node[key] = child
+		} else {
+			child, ok = x.(map[string]any)
+			if !ok {
+				return fmt.Errorf("value for %q in composite key %q is not map[string]any", key, path)
+			}
+		}
+		node = child
+	}
+	node[keys[len(keys)-1]] = value
+
+	return nil
 }

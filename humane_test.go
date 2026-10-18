@@ -390,14 +390,7 @@ func TestHumaneConcurrentGroupHandling(t *testing.T) {
 	for range numGoroutines {
 		wg.Go(func() {
 			<-start
-
-			for j := range recordsPerGoroutine {
-				record := records[j%len(records)]
-				err := handler.Handle(t.Context(), record)
-				if err != nil {
-					t.Errorf("Handle failed: %v", err)
-				}
-			}
+			handleRecords(t, handler, records, recordsPerGoroutine)
 		})
 	}
 
@@ -418,6 +411,18 @@ func TestHumaneConcurrentGroupHandling(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("concurrent Handle output mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// handleRecords passes n records to handler, cycling through records.
+func handleRecords(t *testing.T, handler slog.Handler, records []slog.Record, n int) {
+	t.Helper()
+
+	for i := range n {
+		record := records[i%len(records)]
+		if err := handler.Handle(t.Context(), record); err != nil {
+			t.Errorf("Handle failed: %v", err)
+		}
 	}
 }
 
